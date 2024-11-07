@@ -1,0 +1,2 @@
+TELEGRAM_GROUP_URL=https://t.me/cryptoprojectssbt
+NUTSFARM_LINK=https://t.me/nutsfarm_bot/nutscoin?startapp=ref_YCNYYSFWGOQTBFS
