@@ -1,12 +1,13 @@
 import logging
 import random
 import time
-import keyboard
 from telegram_bot_automation import TelegramBotAutomation
-from utils import read_accounts_from_file, write_accounts_to_file, reset_balances, print_balance_table, export_balances_to_csv, update_balance_table
+from utils import read_accounts_from_file, write_accounts_to_file, reset_balances, update_balance_table
 from colorama import Fore, Style
-from prettytable import PrettyTable
+from prettytable import PrettyTable, SINGLE_BORDER
 from termcolor import colored
+from datetime import datetime, timedelta
+import threading
 
 # Load settings from settings.txt
 def load_settings():
@@ -26,6 +27,7 @@ settings = load_settings()
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+#logger.setLevel(logging.DEBUG)
 
 if not logger.hasHandlers():
     class CustomFormatter(logging.Formatter):
@@ -54,8 +56,12 @@ if not logger.hasHandlers():
     handler.setFormatter(CustomFormatter('%(asctime)s - %(levelname)s - %(message)s'))
     logger.addHandler(handler)
 
+# Словарь для хранения таймеров
+scheduled_timers = {}
+
 def process_accounts():
-    while True:
+    global scheduled_timers
+    try:
         reset_balances()
         accounts = read_accounts_from_file()
         random.shuffle(accounts)
@@ -64,13 +70,14 @@ def process_accounts():
         account_balances = []
         accounts_with_zero_balance = []
 
-        # Main cycle processing
+        # Основной цикл обработки
         logger.info("Starting main cycle for account processing.")
         for account in accounts:
             retry_count = 0
             success = False
             bot = None
             balance = 0.0
+            adjusted_time_str = "N/A"  # Инициализация переменной времени
 
             while retry_count < 3 and not success:
                 try:
@@ -83,28 +90,56 @@ def process_accounts():
                     if not bot.click_link():
                         raise Exception("Failed to click link")
                     bot.preparing_account()
+
+                    # Получение баланса
                     balance = bot.get_balance()
-                    if isinstance(balance, bool):
-                        balance = 0.0
+                    logger.debug(f"Account {account}: Retrieved balance: {balance} (type: {type(balance)})")
+
+                    # Проверяем, если баланс строка, пытаемся преобразовать в число
+                    if isinstance(balance, str):
+                        if balance.replace('.', '', 1).isdigit():
+                            balance = float(balance) if '.' in balance else int(balance)
+                        else:
+                            logger.warning(f"Account {account}: Invalid balance format: {balance}. Setting to 0.0.")
+                            balance = 0.0
+
+                    # Если баланс не число после всех проверок, сбрасываем его в 0.0
                     if not isinstance(balance, (int, float)):
+                        logger.warning(f"Account {account}: Balance is not a number. Setting to 0.0.")
                         balance = 0.0
+
+                    # Логирование после всех проверок
+                    logger.info(f"Account {account}: Final balance after processing: {balance}.")
+
+                    # Фермерство (до получения времени)
                     bot.farming()
-                    bot.get_time()
-                    balance = bot.get_balance()
-                    if isinstance(balance, bool):
-                        balance = 0.0
-                    if not isinstance(balance, (int, float)):
-                        balance = 0.0
-                    logger.info(f"Account {account}: Processing completed successfully.")
+
+                    # Получение времени до следующего клейма
+                    scheduled_time = bot.get_time()
+
+                    # Парсинг времени HH:MM:SS
+                    hours, minutes, seconds = map(int, scheduled_time.split(':'))
+                    time_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+
+                    # Рассчитываем точное время следующего запуска
+                    trigger_time = datetime.now() + time_delta
+
+                    # Добавляем случайное значение (от 5 до 30 минут)
+                    random_minutes = random.randint(5, 30)
+                    trigger_time += timedelta(minutes=random_minutes)
+
+                    # Форматируем запланированное время в строку
+                    adjusted_time_str = trigger_time.strftime("%Y-%m-%d %H:%M:%S")
+                    logger.info(f"Account {account}: Adjusted scheduled time for next claim: {adjusted_time_str}")
+
                     success = True
-                    update_balance_table(account, bot.username, balance)  # Replace "Username" with actual username if available
+                    update_balance_table(account, bot.username, balance, adjusted_time_str)  # Используем точное время
                 except Exception as e:
                     logger.warning(f"Account {account}: Error occurred on attempt {retry_count + 1}: {e}")
                     retry_count += 1
                 finally:
-                    logger.info("-------------END-----------")
-                    bot.browser_manager.close_browser()
-                    logger.info("-------------END-----------")
+                    if bot:
+                        bot.browser_manager.close_browser()
                     sleep_time = random.randint(5, 15)
                     logger.info(f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                     time.sleep(sleep_time)
@@ -112,24 +147,44 @@ def process_accounts():
                 if retry_count >= 3:
                     logger.warning(f"Account {account}: Failed after 3 attempts.")
 
-            if not success:
-                logger.warning(f"Account {account}: Moving to next account after 3 failed attempts.")
-                update_balance_table(account, bot.username if bot and bot.username else "N/A", "ERROR")
+            # Обновляем список результатов
+            account_balances.append((account, bot.username if bot and bot.username else "N/A", balance if success else 0.0, adjusted_time_str, "Success" if success else "ERROR"))
 
-            account_balances.append((account, bot.username if bot and bot.username else "N/A", balance if success and isinstance(balance, (int, float)) else 0.0, "Success" if success else "ERROR"))
+            # Вывод таблицы после обработки аккаунта
+            logger.info("\nCurrent Balance Table:")
+            current_table = PrettyTable()
+            current_table.field_names = ["ID", "Username", "Balance", "Scheduled Time", "Status"]
+            total_balance = 0.0
 
-            # Collect accounts with zero balance for retry
-            if balance == 0.0:
-                accounts_with_zero_balance.append(account)
+            for serial_number, username, bal, scheduled_time, status in account_balances:
+                row = [serial_number, username if username else "N/A", bal, scheduled_time if scheduled_time else "N/A", status]
+                if bal == 0.0:
+                    current_table.add_row([colored(cell, "red") for cell in row])
+                else:
+                    current_table.add_row([colored(cell, "cyan") for cell in row])
+                    if isinstance(bal, (int, float)):
+                        total_balance += bal
 
-        # Retry accounts with zero balance
-        retry_account_balances = []
-        logger.info("Starting retry cycle for accounts with zero balance.")
+            logger.info("\n" + str(current_table))
+            logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:,.2f}{Style.RESET_ALL}")
+
+            # Установка таймера после фермерства
+            if adjusted_time_str != "N/A":
+                trigger_time = datetime.strptime(adjusted_time_str, "%Y-%m-%d %H:%M:%S")
+                scheduled_timers[account] = threading.Timer(
+                    (trigger_time - datetime.now()).total_seconds(),
+                    lambda acc=account: process_account_once(acc)
+                )
+                scheduled_timers[account].start()
+                logger.info(f"Account {account}: Timer set for {adjusted_time_str}.")
+
+        # Дополнительный цикл обработки (для аккаунтов с нулевым балансом)
         for account in accounts_with_zero_balance:
             retry_count = 0
             success = False
             bot = None
             balance = 0.0
+            adjusted_time_str = "N/A"
 
             while retry_count < 3 and not success:
                 try:
@@ -142,73 +197,47 @@ def process_accounts():
                     if not bot.click_link():
                         raise Exception("Failed to click link")
                     bot.preparing_account()
+
+                    # Получение баланса
                     balance = bot.get_balance()
-                    if isinstance(balance, bool):
-                        balance = 0.0
-                    if not isinstance(balance, (int, float)):
-                        balance = 0.0
+
+                    # Фермерство (до получения времени)
                     bot.farming()
-                    bot.get_time()
-                    balance = bot.get_balance()
-                    if isinstance(balance, bool):
-                        balance = 0.0
-                    if not isinstance(balance, (int, float)):
-                        balance = 0.0
-                    logger.info(f"Account {account}: Retried processing completed successfully.")
+
+                    # Получение времени до следующего клейма
+                    scheduled_time = bot.get_time()
+
                     success = True
-                    update_balance_table(account, bot.username, balance)
+                    update_balance_table(account, bot.username, balance, scheduled_time)
                 except Exception as e:
                     logger.warning(f"Account {account}: Error occurred on retry attempt {retry_count + 1}: {e}")
                     retry_count += 1
                 finally:
                     if bot:
-                        logger.info("-------------END-----------")
                         bot.browser_manager.close_browser()
-                        logger.info("-------------END-----------")
                     sleep_time = random.randint(5, 15)
                     logger.info(f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                     time.sleep(sleep_time)
 
                 if retry_count >= 3:
                     logger.warning(f"Account {account}: Failed after 3 retry attempts.")
-                    update_balance_table(account, bot.username if bot and bot.username else "N/A", "ERROR")
 
-            retry_account_balances.append((account, bot.username if bot and bot.username else "N/A", balance if success and isinstance(balance, (int, float)) else 0.0, "Success" if success else "ERROR"))
+    except KeyboardInterrupt:
+        logger.info("Process interrupted by user. Cancelling all timers and closing browsers...")
+        for account, timer in scheduled_timers.items():
+            if timer.is_alive():
+                timer.cancel()
+                logger.info(f"Account {account}: Timer cancelled.")
 
-        # Print balance tables for both the main cycle and the retry cycle
-        logger.info("\nMain Cycle Balance Table:")
-        main_table = PrettyTable()
-        main_table.field_names = ["ID", "Username", "Balance", "Status"]
-        total_balance = 0.0
-        for serial_number, username, balance, status in account_balances:
-            row = [serial_number, username if username else 'N/A', balance, status]
-            if balance == 0.0:
-                main_table.add_row([colored(cell, 'red') for cell in row])
-            else:
-                main_table.add_row([colored(cell, 'cyan') for cell in row])
-                if isinstance(balance, (int, float)):
-                    total_balance += balance
-
-        logger.info("\n" + str(main_table))
-        logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:,.2f}{Style.RESET_ALL}")
-
-        logger.info("\nRetry Cycle Balance Table:")
-        retry_table = PrettyTable()
-        retry_table.field_names = ["ID", "Username", "Balance", "Status"]
-        total_retry_balance = 0.0
-        for serial_number, username, balance, status in retry_account_balances:
-            row = [serial_number, username if username else 'N/A', balance, status]
-            retry_table.add_row([colored(cell, 'yellow') for cell in row])
-            if status == "Success" and isinstance(balance, (int, float)):
-                total_retry_balance += balance
-
-        logger.info("\n" + str(retry_table))
-        logger.info(f"Total Retry Balance: {Fore.MAGENTA}{total_retry_balance:,.2f}{Style.RESET_ALL}")
-
-        logger.info("All accounts processed. Waiting 8 hours before restarting.")
-        for hour in range(8):
-            logger.info(f"Waiting... {8 - hour} hours left till restart.")
-            time.sleep(60 * 60)
+        if bot and hasattr(bot.browser_manager, "api_stop_browser"):
+            try:
+                bot.browser_manager.api_stop_browser()
+                logger.info(f"Browser for account {account} stopped successfully.")
+            except Exception as e:
+                logger.warning(f"Failed to stop browser for account {account}: {e}")
+        logger.info("All browsers closed. Exiting...")
+    except Exception as e:
+        logger.exception(f"Unexpected error: {e}")
 
 if __name__ == "__main__":
     try:

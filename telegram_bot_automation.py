@@ -1,7 +1,6 @@
 import logging
 import random
 import time
-import keyboard
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -9,6 +8,8 @@ from selenium.common.exceptions import NoSuchElementException, WebDriverExceptio
 from browser_manager import BrowserManager
 from utils import update_balance_table
 from colorama import Fore, Style
+
+
 
 # Set up logging with colors
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ class TelegramBotAutomation:
         while retries < self.MAX_RETRIES:
             try:
                 self.driver.get('https://web.telegram.org/k/')
-                logger.info(f"Account {self.serial_number}: Navigated to Telegram web.")
+                logger.debug(f"Account {self.serial_number}: Navigated to Telegram web.")
                 self.close_extra_windows()
                 sleep_time = random.randint(5, 7)
                 logger.info(f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
@@ -100,7 +101,7 @@ class TelegramBotAutomation:
                 search_area = self.wait_for_element(By.XPATH, '/html/body/div[1]/div[1]/div[1]/div[1]/div[1]/div[3]/div[2]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/ul[1]/a[1]/div[1]')
                 if search_area:
                     search_area.click()
-                    logger.info(f"Account {self.serial_number}: Group searched.")
+                    logger.debug(f"Account {self.serial_number}: Group searched.")
                 sleep_time = random.randint(5, 7)
                 logger.info(f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                 time.sleep(sleep_time)
@@ -142,7 +143,7 @@ class TelegramBotAutomation:
                 EC.element_to_be_clickable((by, value))
             )
         except TimeoutException:
-            logger.warning(f"Account {self.serial_number}: Failed to find the element located by {by} with value {value} within {timeout} seconds.")
+            #logger.warning(f"Account {self.serial_number}: Failed to find the element located by {by} with value {value} within {timeout} seconds.")
             return None
         except Exception as e:
             logger.error(f"Account {self.serial_number}: Unexpected error while waiting for element: {str(e)}")
@@ -162,7 +163,7 @@ class TelegramBotAutomation:
                 try:
                     element = self.driver.find_element(By.XPATH, xpath)
                     element.click()
-                    logger.info(f"Account {self.serial_number}: {success_msg}")
+                    logger.debug(f"Account {self.serial_number}: {success_msg}")
                     sleep_time = random.randint(5, 7)
                     logger.info(f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                     time.sleep(sleep_time)
@@ -181,7 +182,7 @@ class TelegramBotAutomation:
             iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
             if iframes:
                 self.driver.switch_to.frame(iframes[0])
-                logger.info(f"Account {self.serial_number}: Switched to iframe.")
+                logger.debug(f"Account {self.serial_number}: Switched to iframe.")
                 return True
         except NoSuchElementException:
             logger.warning(f"Account {self.serial_number}: No iframe found.")
@@ -189,30 +190,62 @@ class TelegramBotAutomation:
             logger.error(f"Account {self.serial_number}: Unexpected error while switching to iframe: {str(e)}")
         return False
 
+
     def get_balance(self):
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
+                # Ожидание контейнера с балансом
                 parent_block = WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'flex items-center font-tt-hoves')]"))
                 )
+                logger.debug("Parent block for balance found.")
+
+                # Поиск всех чисел в балансе
                 visible_balance_elements = parent_block.find_elements(By.XPATH, ".//span[contains(@class, 'index-module_num__j6XH3') and not(@aria-hidden='true')]")
+                logger.debug(f"Extracted raw balance elements: {[el.get_attribute('textContent').strip() for el in visible_balance_elements]}")
+
+                # Сбор текста чисел и объединение в строку
                 balance_text = ''.join([element.get_attribute("textContent").strip() for element in visible_balance_elements])
-                
-                parent_block = self.driver.find_element(By.XPATH, "/html/body")
-                visible_time_elements = parent_block.find_elements(By.XPATH, "/html/body/div[1]/div[1]/header/button/p")
-                username_text = ''.join([element.get_attribute("textContent").strip() for element in visible_time_elements])
-                self.username = username_text  # Store username
-                self.balance = float(balance_text) if balance_text.isdigit() else 0.0  # Store balance as float
+                logger.debug(f"Raw balance text: {balance_text}")
+
+                # Удаление запятых
+                balance_text = balance_text.replace(',', '')
+                logger.debug(f"Cleaned balance text: {balance_text}")
+
+                # Преобразование в float
+                if balance_text.replace('.', '', 1).isdigit():
+                    self.balance = float(balance_text)
+                else:
+                    logger.warning(f"Balance text is invalid: '{balance_text}'")
+                    self.balance = 0.0
+
+                # Преобразование float к строке, удаление .0
+                if self.balance.is_integer():
+                    balance_text = str(int(self.balance))  # Удаляет .0
+
+                # Получение имени пользователя
+                username_block = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, "//header/button/p"))  # Укажите точный XPATH для username
+                )
+                self.username = username_block.get_attribute("textContent").strip()
+                #logger.debug(f"Retrieved username: {self.username}")
+
+                # Логирование
                 logger.info(f"Account {self.serial_number}: Current username: {self.username}")
-                logger.info(f"Account {self.serial_number}: Current balance: {self.balance}")
-                update_balance_table(self.serial_number, self.username, self.balance)
-                return self.balance
+                logger.info(f"Account {self.serial_number}: Current balance: {balance_text}")
+
+                # Обновление таблицы
+                update_balance_table(self.serial_number, self.username, balance_text)
+                return balance_text
+
             except (NoSuchElementException, TimeoutException) as e:
-                logger.warning(f"Account {self.serial_number}: Failed to get balance (attempt {retries + 1}): {str(e)}")
+                logger.warning(f"Account {self.serial_number}: Failed to get balance or username (attempt {retries + 1}): {str(e)}")
                 retries += 1
                 time.sleep(5)
-        return 0.0
+
+        # Возврат 0 в случае неудачи
+        return "0"
 
     def get_time(self):
         retries = 0

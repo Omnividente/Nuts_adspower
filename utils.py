@@ -39,7 +39,7 @@ def read_accounts_from_file():
     try:
         with open('accounts.txt', 'r') as file:
             accounts = [line.strip() for line in file.readlines()]
-            logger.info(f"Successfully read {len(accounts)} accounts from file.")
+            logger.debug(f"Successfully read {len(accounts)} accounts from file.")
             return accounts
     except FileNotFoundError:
         logger.error("accounts.txt file not found.")
@@ -53,7 +53,7 @@ def write_accounts_to_file(accounts):
         with open('accounts.txt', 'w') as file:
             for account in accounts:
                 file.write(f"{account}\n")
-        logger.info("Accounts written to file successfully.")
+        logger.debug("Accounts written to file successfully.")
     except IOError as e:
         logger.error(f"Failed to write accounts to file: {str(e)}")
     except Exception as e:
@@ -62,16 +62,17 @@ def write_accounts_to_file(accounts):
 def reset_balances():
     global balances
     balances = []
-    logger.info("Balances reset successfully.")
+    logger.debug("Balances reset successfully.")
 
-def update_balance_table(serial_number, username_text, balance):
+def update_balance_table(serial_number, username_text, balance, scheduled_time="N/A"):
     global balances
-    for i, (serial, user, bal) in enumerate(balances):
+    for i, (serial, user, bal, sched_time) in enumerate(balances):
         if serial == serial_number:
-            balances[i] = (serial_number, username_text, balance)
+            balances[i] = (serial_number, username_text, balance, scheduled_time)
             return
-    balances.append((serial_number, username_text, balance))
-    logger.info(f"Balance updated for account {serial_number}: Username - {username_text}, Balance - {balance}")
+    balances.append((serial_number, username_text, balance, scheduled_time))
+    logger.debug(f"Balance updated for account {serial_number}: Username - {username_text}, Balance - {balance}, Scheduled Time - {scheduled_time}")
+
 
 def print_balance_table():
     table = PrettyTable()
