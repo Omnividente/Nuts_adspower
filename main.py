@@ -58,6 +58,75 @@ if not logger.hasHandlers():
 
 # Словарь для хранения таймеров
 scheduled_timers = {}
+from prettytable import PrettyTable
+from termcolor import colored
+
+def process_account_once(account):
+    """
+    Обрабатывает заданный аккаунт в рамках запланированного таймера
+    и выводит обновлённую таблицу после выполнения.
+    """
+    logger.info(f"Scheduled processing for account {account}. Starting...")
+
+    global account_balances  # Используем глобальный список для обновления таблицы
+
+    try:
+        bot = TelegramBotAutomation(account, settings)
+
+        if not bot.navigate_to_bot():
+            raise Exception("Failed to navigate to bot")
+        bot.username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
+
+        if not bot.send_message(settings['TELEGRAM_GROUP_URL']):
+            raise Exception("Failed to send message")
+        if not bot.click_link():
+            raise Exception("Failed to click link")
+
+        bot.preparing_account()
+
+        # Выполняем фермерство
+        bot.farming()
+
+        # Получаем баланс
+        balance = bot.get_balance()
+        logger.info(f"Account {account}: Current balance after farming: {balance}")
+
+        # Получаем время до следующего действия
+        scheduled_time = bot.get_time()
+        logger.info(f"Account {account}: Next scheduled time: {scheduled_time}")
+
+        # Обновляем глобальную таблицу с балансами
+        update_balance_table(account, bot.username, balance, scheduled_time)
+
+        # Добавляем результат обработки в глобальный список
+        account_balances.append((account, bot.username, balance, scheduled_time, "Success"))
+
+    except Exception as e:
+        logger.warning(f"Account {account}: Error occurred during scheduled processing: {e}")
+        account_balances.append((account, "N/A", 0.0, "N/A", "ERROR"))
+    finally:
+        if bot and hasattr(bot.browser_manager, "close_browser"):
+            bot.browser_manager.close_browser()
+        logger.info(f"Account {account}: Processing completed.")
+
+    # Вывод обновлённой таблицы после обработки аккаунта
+    logger.info("\nUpdated Balance Table:")
+    current_table = PrettyTable()
+    current_table.field_names = ["ID", "Username", "Balance", "Scheduled Time", "Status"]
+    total_balance = 0.0
+
+    for serial_number, username, balance, scheduled_time, status in account_balances:
+        row = [serial_number, username if username else "N/A", balance, scheduled_time if scheduled_time else "N/A", status]
+        if status == "ERROR":
+            current_table.add_row([colored(cell, "red") for cell in row])
+        else:
+            current_table.add_row([colored(cell, "cyan") for cell in row])
+            if isinstance(balance, (int, float)):
+                total_balance += balance
+
+    logger.info("\n" + str(current_table))
+    logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:,.2f}{Style.RESET_ALL}")
+
 
 def process_accounts():
     global scheduled_timers
