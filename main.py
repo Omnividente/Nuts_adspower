@@ -84,7 +84,7 @@ def process_accounts():
                     bot = TelegramBotAutomation(account, settings)
                     if not bot.navigate_to_bot():
                         raise Exception("Failed to navigate to bot")
-                    bot.username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
+                    
                     if not bot.send_message(settings['TELEGRAM_GROUP_URL']):
                         raise Exception("Failed to send message")
                     if not bot.click_link():
@@ -94,7 +94,7 @@ def process_accounts():
                     # Получение баланса
                     balance = bot.get_balance()
                     logger.debug(f"Account {account}: Retrieved balance: {balance} (type: {type(balance)})")
-
+                    username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
                     # Проверяем, если баланс строка, пытаемся преобразовать в число
                     if isinstance(balance, str):
                         if balance.replace('.', '', 1).isdigit():
@@ -133,7 +133,7 @@ def process_accounts():
                     logger.info(f"Account {account}: Adjusted scheduled time for next claim: {adjusted_time_str}")
 
                     success = True
-                    update_balance_table(account, bot.username, balance, adjusted_time_str)  # Используем точное время
+                    update_balance_table(account, username, balance, adjusted_time_str)  # Используем точное время
                 except Exception as e:
                     logger.warning(f"Account {account}: Error occurred on attempt {retry_count + 1}: {e}")
                     retry_count += 1
@@ -148,7 +148,7 @@ def process_accounts():
                     logger.warning(f"Account {account}: Failed after 3 attempts.")
 
             # Обновляем список результатов
-            account_balances.append((account, bot.username if bot and bot.username else "N/A", balance if success else 0.0, adjusted_time_str, "Success" if success else "ERROR"))
+            account_balances.append((account, username if bot and username else "N/A", balance if success else 0.0, adjusted_time_str, "Success" if success else "ERROR"))
 
             # Вывод таблицы после обработки аккаунта
             logger.info("\nCurrent Balance Table:")
@@ -191,13 +191,13 @@ def process_accounts():
                     bot = TelegramBotAutomation(account, settings)
                     if not bot.navigate_to_bot():
                         raise Exception("Failed to navigate to bot")
-                    bot.username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
+                    
                     if not bot.send_message(settings['TELEGRAM_GROUP_URL']):
                         raise Exception("Failed to send message")
                     if not bot.click_link():
                         raise Exception("Failed to click link")
                     bot.preparing_account()
-
+                    username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
                     # Получение баланса
                     balance = bot.get_balance()
 
@@ -208,7 +208,7 @@ def process_accounts():
                     scheduled_time = bot.get_time()
 
                     success = True
-                    update_balance_table(account, bot.username, balance, scheduled_time)
+                    update_balance_table(account, username, balance, scheduled_time)
                 except Exception as e:
                     logger.warning(f"Account {account}: Error occurred on retry attempt {retry_count + 1}: {e}")
                     retry_count += 1
@@ -228,13 +228,16 @@ def process_accounts():
             if timer.is_alive():
                 timer.cancel()
                 logger.info(f"Account {account}: Timer cancelled.")
-
-        if bot and hasattr(bot.browser_manager, "api_stop_browser"):
-            try:
+        try:
+            if bot and hasattr(bot.browser_manager, "api_stop_browser"):
                 bot.browser_manager.api_stop_browser()
                 logger.info(f"Browser for account {account} stopped successfully.")
-            except Exception as e:
-                logger.warning(f"Failed to stop browser for account {account}: {e}")
+            if bot and bot.browser_manager.driver:
+                bot.browser_manager.driver.quit()  # Закрытие WebDriver
+                logger.info(f"WebDriver for account {account} stopped successfully.")
+        except Exception as e:
+            logger.warning(f"Failed to stop browser or WebDriver for account {account}: {e}")
+        
         logger.info("All browsers closed. Exiting...")
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
