@@ -190,7 +190,15 @@ class TelegramBotAutomation:
             logger.error(f"Account {self.serial_number}: Unexpected error while switching to iframe: {str(e)}")
         return False
 
-
+    def get_username(self):
+        # Получение имени пользователя
+        username_block = WebDriverWait(self.driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//header/button/p"))  # Укажите точный XPATH для username
+        )
+        username = username_block.get_attribute("textContent").strip()
+        #logger.info(f"Account {self.serial_number}: Current username: {username}")
+        return username
+    
     def get_balance(self):
         retries = 0
         while retries < self.MAX_RETRIES:
@@ -223,16 +231,10 @@ class TelegramBotAutomation:
                 # Преобразование float к строке, удаление .0
                 if self.balance.is_integer():
                     balance_text = str(int(self.balance))  # Удаляет .0
-
-                # Получение имени пользователя
-                username_block = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, "//header/button/p"))  # Укажите точный XPATH для username
-                )
-                self.username = username_block.get_attribute("textContent").strip()
-                #logger.debug(f"Retrieved username: {self.username}")
-
+                self.get_username()
+                
                 # Логирование
-                logger.info(f"Account {self.serial_number}: Current username: {self.username}")
+                
                 logger.info(f"Account {self.serial_number}: Current balance: {balance_text}")
 
                 # Обновление таблицы
