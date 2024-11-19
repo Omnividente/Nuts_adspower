@@ -165,3 +165,30 @@ class BrowserManager:
             logger.exception(f"Account {self.serial_number}: Unexpected exception while stopping browser: {str(e)}")
 
         return False
+    def api_stop_browser(self):
+        """Закрывает браузер через API, если стандартное закрытие не сработало, подавляя сетевые ошибки при прерывании."""
+        try:
+            response = requests.get(
+                'http://local.adspower.net:50325/api/v1/browser/stop',
+                params={'serial_number': self.serial_number}
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data['code'] == 0:
+                logger.info(f"Account {self.serial_number}: Browser stopped via API successfully.")
+                self.browser_open = False
+                return True
+            else:
+                logger.error(f"Account {self.serial_number}: API did not confirm browser stop. Code: {data['code']}")
+                self.browser_open = True  # Считаем, что браузер может оставаться открытым
+        except (RequestException, MaxRetryError, NewConnectionError, KeyboardInterrupt) as e:
+            # Подавляем сетевые ошибки при прерывании и сетевые исключения
+            if isinstance(e, KeyboardInterrupt):
+                logger.info(f"Account {self.serial_number}: API stop interrupted by KeyboardInterrupt. Suppressing network-related errors.")
+                return True
+            logger.error(f"Account {self.serial_number}: Network issue while stopping browser via API: {str(e)}")
+            self.browser_open = True
+        except Exception as e:
+            logger.exception(f"Account {self.serial_number}: Unexpected exception while stopping browser via API: {str(e)}")
+            self.browser_open = True
+        return False
