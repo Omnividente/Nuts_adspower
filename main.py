@@ -58,8 +58,7 @@ if not logger.hasHandlers():
 
 # Словарь для хранения таймеров
 scheduled_timers = {}
-from prettytable import PrettyTable
-from termcolor import colored
+
 
 def process_account_once(account):
     """
@@ -75,7 +74,7 @@ def process_account_once(account):
 
         if not bot.navigate_to_bot():
             raise Exception("Failed to navigate to bot")
-        bot.username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
+        
 
         if not bot.send_message(settings['TELEGRAM_GROUP_URL']):
             raise Exception("Failed to send message")
@@ -83,12 +82,25 @@ def process_account_once(account):
             raise Exception("Failed to click link")
 
         bot.preparing_account()
-
+        
         # Выполняем фермерство
         bot.farming()
-
+        username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
         # Получаем баланс
         balance = bot.get_balance()
+        # Проверяем, если баланс строка, пытаемся преобразовать в число
+        if isinstance(balance, str):
+            if balance.replace('.', '', 1).isdigit():
+               balance = float(balance) if '.' in balance else int(balance)
+            else:
+               logger.warning(f"Account {account}: Invalid balance format: {balance}. Setting to 0.0.")
+               balance = 0.0
+
+        # Если баланс не число после всех проверок, сбрасываем его в 0.0
+        if not isinstance(balance, (int, float)):
+           logger.warning(f"Account {account}: Balance is not a number. Setting to 0.0.")
+           balance = 0.0
+
         logger.info(f"Account {account}: Current balance after farming: {balance}")
 
         # Получаем время до следующего действия
@@ -96,10 +108,10 @@ def process_account_once(account):
         logger.info(f"Account {account}: Next scheduled time: {scheduled_time}")
 
         # Обновляем глобальную таблицу с балансами
-        update_balance_table(account, bot.username, balance, scheduled_time)
+        update_balance_table(account, username, balance, scheduled_time)
 
         # Добавляем результат обработки в глобальный список
-        account_balances.append((account, bot.username, balance, scheduled_time, "Success"))
+        account_balances.append((account, username, balance, scheduled_time, "Success"))
 
     except Exception as e:
         logger.warning(f"Account {account}: Error occurred during scheduled processing: {e}")
