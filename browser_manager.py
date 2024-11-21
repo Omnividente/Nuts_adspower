@@ -1,8 +1,8 @@
 import requests
 import time
 import logging
-import keyboard
 from selenium import webdriver
+from requests.exceptions import RequestException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
@@ -128,25 +128,31 @@ class BrowserManager:
         logger.error(f"Account {self.serial_number}: Failed to start browser after {self.MAX_RETRIES} retries.")
         return False
 
-    def close_browser(self):        
+    
+    def close_browser(self):
+        """
+        Закрывает браузер, используя Selenium WebDriver и API, с обработкой возможных ошибок.
+        """
         try:
             if self.driver:
                 try:
                     self.driver.close()
                     self.driver.quit()
-                    self.driver = None
-                    logger.info(f"Account {self.serial_number}: Browser closed successfully.")                        
+                    logger.info(f"Account {self.serial_number}: Browser closed successfully via WebDriver.")
                 except WebDriverException as e:
-                    logger.warning(f"Account {self.serial_number}: WebDriverException while closing browser: {str(e)}")
-                    retries += 1
-                    time.sleep(5)
-              
+                    # Проверяем, является ли это проблемой подключения
+                    if "Max retries exceeded" in str(e) or "Failed to establish a new connection" in str(e):
+                        logger.warning(f"Account {self.serial_number}: WebDriver lost connection. Suppressing error: {str(e)}")
+                    else:
+                        logger.warning(f"Account {self.serial_number}: WebDriverException while closing browser: {str(e)}")
+                except Exception as e:
+                    logger.exception(f"Account {self.serial_number}: General exception while closing browser via WebDriver: {str(e)}")
+                finally:
+                    self.driver = None  # Обнуляем драйвер, чтобы избежать повторных вызовов
         except Exception as e:
-            logger.exception(f"Account {self.serial_number}: General exception while closing browser: {str(e)}")
-            retries += 1
-            time.sleep(5)
-        
-        # Final attempt to stop browser via API
+            logger.exception(f"Account {self.serial_number}: Unexpected error during browser close: {str(e)}")
+
+        # Попытка остановить браузер через API
         try:
             response = requests.get(
                 'http://local.adspower.net:50325/api/v1/browser/stop',
@@ -154,17 +160,21 @@ class BrowserManager:
             )
             response.raise_for_status()
             data = response.json()
-            if data['code'] == 0:
+
+            if data.get('code') == 0:
                 logger.info(f"Account {self.serial_number}: Browser stopped via API successfully.")
                 return True
             else:
-                logger.warning(f"Account {self.serial_number}: Browser stop failed via API, status unknown.")
+                logger.warning(f"Account {self.serial_number}: API stop returned unexpected code: {data.get('code')}")
         except requests.exceptions.RequestException as e:
-            logger.error(f"Account {self.serial_number}: Network issue while stopping browser: {str(e)}")
+            logger.error(f"Account {self.serial_number}: Network issue while stopping browser via API: {str(e)}")
         except Exception as e:
-            logger.exception(f"Account {self.serial_number}: Unexpected exception while stopping browser: {str(e)}")
+            logger.exception(f"Account {self.serial_number}: Unexpected error during API stop: {str(e)}")
 
         return False
+
+
+
     def api_stop_browser(self):
         """Закрывает браузер через API, если стандартное закрытие не сработало, подавляя сетевые ошибки при прерывании."""
         try:
@@ -181,7 +191,7 @@ class BrowserManager:
             else:
                 logger.error(f"Account {self.serial_number}: API did not confirm browser stop. Code: {data['code']}")
                 self.browser_open = True  # Считаем, что браузер может оставаться открытым
-        except (RequestException, MaxRetryError, NewConnectionError, KeyboardInterrupt) as e:
+        except (RequestException, KeyboardInterrupt) as e:
             # Подавляем сетевые ошибки при прерывании и сетевые исключения
             if isinstance(e, KeyboardInterrupt):
                 logger.info(f"Account {self.serial_number}: API stop interrupted by KeyboardInterrupt. Suppressing network-related errors.")
