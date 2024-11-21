@@ -61,10 +61,11 @@ if not logger.hasHandlers():
 account_balances = []
 balance_queue = Queue()
 
-def process_account_once(account, balance_queue):
+def process_account_once(account, balance_queue, active_timers):
     """
     Обрабатывает заданный аккаунт в рамках запланированного таймера
     и выводит обновлённую таблицу после выполнения.
+    В случае ошибки планирует повторную обработку через 30–70 минут.
     """
     logger.info(f"Scheduled processing for account {account}. Starting...")
 
@@ -74,7 +75,7 @@ def process_account_once(account, balance_queue):
         if not bot.navigate_to_bot():
             raise Exception("Failed to navigate to bot")
         
-        if not bot.send_message(settings['TELEGRAM_GROUP_URL']):
+        if not bot.send_message(settings['TELEGRAM_GROUP_URL']): 
             raise Exception("Failed to send message")
         
         if not bot.click_link():
@@ -120,6 +121,17 @@ def process_account_once(account, balance_queue):
         logger.warning(f"Account {account}: Error occurred during scheduled processing: {e}")
         balance_queue.put((account, "N/A", 0.0, "N/A", "ERROR"))
 
+        # Планируем повторный запуск для аккаунтов с ошибкой
+        retry_delay = random.randint(1800, 4200)  # 30–70 минут
+        logger.info(f"Account {account}: Scheduling retry in {retry_delay // 60} minutes.")
+        retry_timer = threading.Timer(
+            retry_delay,
+            process_account_once,
+            args=(account, balance_queue, active_timers)
+        )
+        active_timers.append(retry_timer)
+        retry_timer.start()
+
     finally:
         if bot and hasattr(bot.browser_manager, "close_browser"):
             try:
@@ -130,6 +142,7 @@ def process_account_once(account, balance_queue):
 
     # Вывод обновлённой таблицы после обработки аккаунта
     display_balance_table(balance_queue)
+
 
 
 def display_balance_table(balance_queue):
@@ -219,7 +232,7 @@ def process_accounts():
                         trigger_time = datetime.now() + time_delta + timedelta(minutes=random.randint(5, 30))
                         adjusted_time_str = trigger_time.strftime("%Y-%m-%d %H:%M:%S")
                     else:
-                        adjusted_time_str = "N/A"
+                        raise Exception("Invalid scheduled time format")
 
                     logger.info(f"Account {account}: Adjusted scheduled time for next claim: {adjusted_time_str}")
 
@@ -230,6 +243,11 @@ def process_accounts():
                 except Exception as e:
                     logger.warning(f"Account {account}: Error occurred on attempt {retry_count + 1}: {e}")
                     retry_count += 1
+                    if retry_count >= 3:
+                        next_retry_time = datetime.now() + timedelta(minutes=random.randint(30, 70))
+                        adjusted_time_str = next_retry_time.strftime("%Y-%m-%d %H:%M:%S")
+                        balance_queue.put((account, "N/A", 0.0, adjusted_time_str, "ERROR"))
+                        logger.warning(f"Account {account}: Marked as error with next retry at {adjusted_time_str}.")
                 finally:
                     if bot:
                         bot.browser_manager.close_browser()
@@ -238,16 +256,12 @@ def process_accounts():
                     logger.info(f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                     time.sleep(sleep_time)
 
-            if not success:
-                logger.warning(f"Account {account}: Failed after 3 attempts.")
-                balance_queue.put((account, "N/A", 0.0, "N/A", "ERROR"))
-
             # Генерация итоговой таблицы баланса после обработки текущего аккаунта
             current_balances, balance_table, total_balance = generate_final_balance_table(balance_queue, show_remaining=True)
             #print(balance_table)
 
             # Установка таймера для следующего действия
-            if adjusted_time_str != "N/A":
+            if success and adjusted_time_str != "N/A":
                 trigger_time = datetime.strptime(adjusted_time_str, "%Y-%m-%d %H:%M:%S")
                 timer = threading.Timer(
                     (trigger_time - datetime.now()).total_seconds(),
@@ -277,10 +291,10 @@ def process_accounts():
         for timer in active_timers:
             if timer.is_alive():
                 timer.cancel()
-                #logger.info("Timer cancelled.")
         logger.info("All timers and browsers cancelled. Exiting gracefully.")
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
+
 
 
 
@@ -317,8 +331,6 @@ def generate_final_balance_table(balance_queue, show_remaining=False):
     logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:.2f}{Style.RESET_ALL}")
 
     if show_remaining:
-        #logger.info(f"Remaining accounts to process: {balance_queue.qsize()}")        
-        #logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:.2f}{Style.RESET_ALL}")
         pass
 
     return current_balances, table, total_balance
