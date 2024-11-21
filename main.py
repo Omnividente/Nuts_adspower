@@ -277,7 +277,7 @@ def process_accounts():
         for timer in active_timers:
             if timer.is_alive():
                 timer.cancel()
-                logger.info("Timer cancelled.")
+                #logger.info("Timer cancelled.")
         logger.info("All timers and browsers cancelled. Exiting gracefully.")
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")

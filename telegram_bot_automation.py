@@ -68,20 +68,7 @@ class TelegramBotAutomation:
         # Сохранение экземпляра драйвера
         self.driver = self.browser_manager.driver
 
-    def __enter__(self):
-        """
-        Метод для поддержки контекстного менеджера. Возвращает self.
-        """
-        return self
-
-    # def __exit__(self, exc_type, exc_value, traceback):
-    #     """
-    #     Метод для автоматического закрытия браузера при выходе из контекста.
-    #     """
-    #     if self.browser_manager and self.driver:
-    #         logger.info(f"Account {self.serial_number}: Closing browser session.")
-    #         self.browser_manager.close_browser()
-
+ 
     def navigate_to_bot(self):
         retries = 0
         while retries < self.MAX_RETRIES:
