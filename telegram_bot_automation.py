@@ -51,14 +51,36 @@ class TelegramBotAutomation:
         self.balance = 0.0  # Initialize balance as 0.0
         self.browser_manager = BrowserManager(serial_number)
         self.settings = settings
+        self.driver = None
+
         logger.info(f"Initializing automation for account {serial_number}")
+
+        # Ожидание завершения предыдущей сессии браузера
         if not self.browser_manager.wait_browser_close():
             logger.error(f"Account {serial_number}: Failed to close previous browser session.")
-            return
+            raise RuntimeError("Failed to close previous browser session")
+
+        # Запуск браузера
         if not self.browser_manager.start_browser():
             logger.error(f"Account {serial_number}: Failed to start browser.")
-            return
+            raise RuntimeError("Failed to start browser")
+
+        # Сохранение экземпляра драйвера
         self.driver = self.browser_manager.driver
+
+    def __enter__(self):
+        """
+        Метод для поддержки контекстного менеджера. Возвращает self.
+        """
+        return self
+
+    # def __exit__(self, exc_type, exc_value, traceback):
+    #     """
+    #     Метод для автоматического закрытия браузера при выходе из контекста.
+    #     """
+    #     if self.browser_manager and self.driver:
+    #         logger.info(f"Account {self.serial_number}: Closing browser session.")
+    #         self.browser_manager.close_browser()
 
     def navigate_to_bot(self):
         retries = 0
