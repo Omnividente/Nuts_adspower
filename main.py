@@ -266,7 +266,7 @@ def process_accounts():
                 timer = threading.Timer(
                     (trigger_time - datetime.now()).total_seconds(),
                     process_account_once,
-                    args=(account, balance_queue)
+                    args=(account, balance_queue, active_timers)
                 )
                 active_timers.append(timer)
                 timer.start()
