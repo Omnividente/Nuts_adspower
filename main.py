@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from queue import Queue
 import threading
 
+
 # Load settings from settings.txt
 def load_settings():
     settings = {}
@@ -27,7 +28,7 @@ def load_settings():
 settings = load_settings()
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 #logger.setLevel(logging.DEBUG)
 
 if not logger.hasHandlers():
@@ -59,16 +60,11 @@ if not logger.hasHandlers():
 
 # Глобальный список для хранения данных об аккаунтах
 account_balances = []
-balance_queue = Queue()
+balance_dict = {}
+balance_lock = threading.Lock()  # Защита доступа к словарю
 
-def process_account_once(account, balance_queue, active_timers):
-    """
-    Обрабатывает заданный аккаунт в рамках запланированного таймера
-    и выводит обновлённую таблицу после выполнения.
-    В случае ошибки планирует повторную обработку через 30–70 минут.
-    """
+def process_account_once(account, balance_dict, active_timers):
     logger.info(f"Scheduled processing for account {account}. Starting...")
-
     try:
         bot = TelegramBotAutomation(account, settings)
 
@@ -82,20 +78,14 @@ def process_account_once(account, balance_queue, active_timers):
             raise Exception("Failed to click link")
 
         bot.preparing_account()
-        
+
         # Выполняем фермерство
         bot.farming()
         username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
 
         # Получаем баланс
         balance = bot.get_balance()
-
-        # Преобразование баланса в число
-        try:
-            balance = float(balance) if isinstance(balance, str) and balance.replace('.', '', 1).isdigit() else float(balance)
-        except (ValueError, TypeError):
-            logger.warning(f"Account {account}: Invalid balance format: {balance}. Setting to 0.0.")
-            balance = 0.0
+        balance = float(balance) if isinstance(balance, str) and balance.replace('.', '', 1).isdigit() else 0.0
 
         logger.info(f"Account {account}: Current balance after farming: {balance}")
 
@@ -111,15 +101,24 @@ def process_account_once(account, balance_queue, active_timers):
         next_schedule = scheduled_time.strftime("%Y-%m-%d %H:%M:%S")
         logger.info(f"Account {account}: Next scheduled time: {next_schedule}")
 
-        # Обновляем глобальную таблицу с балансами
-        update_balance_table(account, username, balance, next_schedule)
-
-        # Добавляем результат обработки в потокобезопасную очередь
-        balance_queue.put((account, username, balance, next_schedule, "Success"))
+        # Обновляем словарь с балансами
+        with balance_lock:
+            balance_dict[account] = {
+                "username": username,
+                "balance": balance,
+                "next_schedule": next_schedule,
+                "status": "Success"
+            }
 
     except Exception as e:
         logger.warning(f"Account {account}: Error occurred during scheduled processing: {e}")
-        balance_queue.put((account, "N/A", 0.0, "N/A", "ERROR"))
+        with balance_lock:
+            balance_dict[account] = {
+                "username": "N/A",
+                "balance": 0.0,
+                "next_schedule": "N/A",
+                "status": "ERROR"
+            }
 
         # Планируем повторный запуск для аккаунтов с ошибкой
         retry_delay = random.randint(1800, 4200)  # 30–70 минут
@@ -127,7 +126,7 @@ def process_account_once(account, balance_queue, active_timers):
         retry_timer = threading.Timer(
             retry_delay,
             process_account_once,
-            args=(account, balance_queue, active_timers)
+            args=(account, balance_dict, active_timers)
         )
         active_timers.append(retry_timer)
         retry_timer.start()
@@ -141,34 +140,7 @@ def process_account_once(account, balance_queue, active_timers):
                 logger.warning(f"Account {account}: Failed to close browser: {e}")
 
     # Вывод обновлённой таблицы после обработки аккаунта
-    display_balance_table(balance_queue)
-
-
-
-def display_balance_table(balance_queue):
-    """
-    Отображает таблицу балансов, извлекая данные из очереди.
-    """
-    logger.info("\nUpdated Balance Table:")
-    current_table = PrettyTable()
-    current_table.field_names = ["ID", "Username", "Balance", "Next Scheduled Time", "Status"]
-    total_balance = 0.0
-
-    # Извлечение данных из очереди для обновления таблицы
-    all_balances = list(balance_queue.queue)  # Снимок текущего состояния очереди
-    for serial_number, username, balance, next_schedule, status in all_balances:
-        row = [serial_number, username if username else "N/A", balance, next_schedule if next_schedule else "N/A", status]
-        if status == "ERROR":
-            current_table.add_row([f"{Fore.RED}{cell}{Style.RESET_ALL}" for cell in row])
-        else:
-            current_table.add_row([f"{Fore.CYAN}{cell}{Style.RESET_ALL}" for cell in row])
-            if isinstance(balance, (int, float)):
-                total_balance += balance
-
-    logger.info("\n" + str(current_table))
-    logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:,.2f}{Style.RESET_ALL}")
-
-
+    generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True)
 
 
 def process_accounts():
@@ -182,8 +154,6 @@ def process_accounts():
         random.shuffle(accounts)
         write_accounts_to_file(accounts)
 
-        # Очередь для хранения результатов обработки аккаунтов
-        balance_queue = Queue()
         active_timers = []  # Список активных таймеров
         active_bots = []    # Список активных ботов для закрытия браузеров
 
@@ -238,15 +208,27 @@ def process_accounts():
 
                     success = True
 
-                    # Обновление таблицы балансов
-                    balance_queue.put((account, username, balance, adjusted_time_str, "Success"))
+                    # Обновление словаря балансов
+                    with balance_lock:
+                        balance_dict[account] = {
+                            "username": username,
+                            "balance": balance,
+                            "next_schedule": adjusted_time_str,
+                            "status": "Success"
+                        }
                 except Exception as e:
                     logger.warning(f"Account {account}: Error occurred on attempt {retry_count + 1}: {e}")
                     retry_count += 1
                     if retry_count >= 3:
                         next_retry_time = datetime.now() + timedelta(minutes=random.randint(30, 70))
                         adjusted_time_str = next_retry_time.strftime("%Y-%m-%d %H:%M:%S")
-                        balance_queue.put((account, "N/A", 0.0, adjusted_time_str, "ERROR"))
+                        with balance_lock:
+                            balance_dict[account] = {
+                                "username": "N/A",
+                                "balance": 0.0,
+                                "next_schedule": adjusted_time_str,
+                                "status": "ERROR"
+                            }
                         logger.warning(f"Account {account}: Marked as error with next retry at {adjusted_time_str}.")
                 finally:
                     if bot:
@@ -257,8 +239,7 @@ def process_accounts():
                     time.sleep(sleep_time)
 
             # Генерация итоговой таблицы баланса после обработки текущего аккаунта
-            current_balances, balance_table, total_balance = generate_final_balance_table(balance_queue, show_remaining=True)
-            #print(balance_table)
+            generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True)
 
             # Установка таймера для следующего действия
             if success and adjusted_time_str != "N/A":
@@ -266,7 +247,7 @@ def process_accounts():
                 timer = threading.Timer(
                     (trigger_time - datetime.now()).total_seconds(),
                     process_account_once,
-                    args=(account, balance_queue, active_timers)
+                    args=(account, balance_dict, active_timers)
                 )
                 active_timers.append(timer)
                 timer.start()
@@ -300,48 +281,67 @@ def process_accounts():
 
 
 
-def generate_final_balance_table(balance_queue, show_remaining=False):
+
+def generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True):
     """
-    Извлекает данные из очереди и генерирует итоговую таблицу.
-    Возвращает список всех балансов, саму таблицу и общий баланс.
+    Генерирует таблицу балансов и выводит её в лог. Возвращает итоговый баланс, таблицу и список текущих балансов.
+    
+    :param balance_dict: Словарь с данными о балансе аккаунтов.
+    :param show_total: Если True, выводит общий баланс.
+    :param colored_output: Если True, добавляет цвета в таблицу.
+    :return: tuple (список балансов, таблица в виде строки, общий баланс)
     """
-    logger.info("Generating balance table...")
     table = PrettyTable()
-    table.field_names = ["ID", "Username", "Balance", "Scheduled Time", "Status"]
+    table.field_names = ["ID", "Username", "Balance", "Next Scheduled Time", "Status"]
     total_balance = 0.0
-    current_balances = []  # Список для хранения всех балансов
+    current_balances = []  # Список для хранения балансов
 
-    # Снимок текущей очереди для сохранения данных
-    all_balances = list(balance_queue.queue)
+    with balance_lock:
+        for account, data in balance_dict.items():
+            row = [account, data["username"], data["balance"], data["next_schedule"], data["status"]]
+            
+            if colored_output:
+                if data["status"] == "ERROR":
+                    row = [f"{Fore.RED}{cell}{Style.RESET_ALL}" for cell in row]
+                else:
+                    row = [f"{Fore.CYAN}{cell}{Style.RESET_ALL}" for cell in row]
+            
+            table.add_row(row)
+            if data["status"] != "ERROR" and isinstance(data["balance"], (int, float)):
+                total_balance += data["balance"]
 
-    for account, username, balance, scheduled_time, status in all_balances:
-        row = [account, username, balance, scheduled_time, status]
+            # Добавляем данные в список балансов
+            current_balances.append({
+                "ID": account,
+                "Username": data["username"],
+                "Balance": data["balance"],
+                "Next Scheduled Time": data["next_schedule"],
+                "Status": data["status"]
+            })
 
-        if status == "ERROR":
-            row = [Fore.RED + str(cell) + Style.RESET_ALL for cell in row]
-        else:
-            row = [Fore.CYAN + str(cell) + Style.RESET_ALL for cell in row]
-            if isinstance(balance, (int, float)):
-                total_balance += balance
-
-        current_balances.append((account, username, balance, scheduled_time, status))
-        table.add_row(row)
-
+    # Логирование таблицы
     logger.info("\nCurrent Balance Table:\n" + str(table))
-    logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:.2f}{Style.RESET_ALL}")
+    if show_total:
+        logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:,.2f}{Style.RESET_ALL}")
 
-    if show_remaining:
-        pass
+    return current_balances, str(table), total_balance
 
-    return current_balances, table, total_balance
 
 
 
 
 if __name__ == "__main__":
-    try:
-        process_accounts()
-    except KeyboardInterrupt:
-        logger.info("Process interrupted by user. Exiting...")
-    except Exception as e:
-        logger.exception(f"Unexpected error: {e}")
+    while True:
+        try:
+            logger.info("Starting a new processing cycle...")
+            process_accounts()
+            # Добавляем паузу перед повторным запуском основного цикла
+            pause_duration = 300  # 5 минут
+            logger.info(f"Waiting {pause_duration // 60} minutes before restarting the cycle...")
+            time.sleep(pause_duration)
+        except KeyboardInterrupt:
+            logger.info("Process interrupted by user. Exiting...")
+            break
+        except Exception as e:
+            logger.exception(f"Unexpected error occurred: {e}. Restarting the cycle...")
+
