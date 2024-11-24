@@ -165,7 +165,8 @@ class BrowserManager:
                 logger.info(f"Account {self.serial_number}: Browser stopped via API successfully.")
                 return True
             else:
-                logger.warning(f"Account {self.serial_number}: API stop returned unexpected code: {data.get('code')}")
+                pass
+                #logger.warning(f"Account {self.serial_number}: API stop returned unexpected code: {data.get('code')}")
         except requests.exceptions.RequestException as e:
             logger.error(f"Account {self.serial_number}: Network issue while stopping browser via API: {str(e)}")
         except Exception as e:

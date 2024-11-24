@@ -62,8 +62,23 @@ if not logger.hasHandlers():
 account_balances = []
 balance_dict = {}
 balance_lock = threading.Lock()  # Защита доступа к словарю
+exit_flag = False  # Глобальный флаг для выхода из программы
+
 
 def process_account_once(account, balance_dict, active_timers):
+    global exit_flag  # Доступ к глобальному флагу завершения
+
+    # Проверяем активные таймеры, чтобы избежать дублирования
+    active_timers[:] = [t for t in active_timers if t.is_alive()]  # Убираем завершённые таймеры из списка
+    if account in [t.args[0] for t in active_timers]:
+        logger.info(f"Account {account}: Existing timer already active. Skipping duplicate processing.")
+        return
+
+    # Проверяем, установлен ли флаг завершения
+    if exit_flag:
+        logger.info(f"Account {account}: Exit flag detected. Skipping processing.")
+        return
+
     logger.info(f"Scheduled processing for account {account}. Starting...")
     try:
         bot = TelegramBotAutomation(account, settings)
@@ -112,25 +127,27 @@ def process_account_once(account, balance_dict, active_timers):
 
     except Exception as e:
         logger.warning(f"Account {account}: Error occurred during scheduled processing: {e}")
+        retry_delay = random.randint(1800, 4200)  # 30–70 минут
+        next_retry_time = datetime.now() + timedelta(seconds=retry_delay)
+
         with balance_lock:
             balance_dict[account] = {
                 "username": "N/A",
                 "balance": 0.0,
-                "next_schedule": "N/A",
+                "next_schedule": next_retry_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "status": "ERROR"
             }
+        logger.info(f"Account {account}: Scheduling retry in {retry_delay // 60} minutes at {balance_dict[account]['next_schedule']}.")
 
-        # Планируем повторный запуск для аккаунтов с ошибкой
-        retry_delay = random.randint(1800, 4200)  # 30–70 минут
-        logger.info(f"Account {account}: Scheduling retry in {retry_delay // 60} minutes.")
-        retry_timer = threading.Timer(
-            retry_delay,
-            process_account_once,
-            args=(account, balance_dict, active_timers)
-        )
-        active_timers.append(retry_timer)
-        retry_timer.start()
-
+        # Проверяем флаг завершения перед установкой таймера
+        if not exit_flag:
+            retry_timer = threading.Timer(
+                retry_delay,
+                process_account_once,
+                args=(account, balance_dict, active_timers)
+            )
+            active_timers.append(retry_timer)
+            retry_timer.start()
     finally:
         if bot and hasattr(bot.browser_manager, "close_browser"):
             try:
@@ -140,7 +157,9 @@ def process_account_once(account, balance_dict, active_timers):
                 logger.warning(f"Account {account}: Failed to close browser: {e}")
 
     # Вывод обновлённой таблицы после обработки аккаунта
-    generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True)
+    if not exit_flag:
+        generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True)
+
 
 
 def process_accounts():
@@ -148,6 +167,8 @@ def process_accounts():
     Обрабатывает список аккаунтов с поддержкой ретраев и таймеров, показывая общую таблицу баланса после обработки каждого аккаунта.
     При прерывании (Ctrl+C) все таймеры и браузеры закрываются.
     """
+    global exit_flag  # Используем глобальный флаг для завершения
+
     try:
         reset_balances()
         accounts = read_accounts_from_file()
@@ -161,107 +182,132 @@ def process_accounts():
 
         # Основной цикл обработки аккаунтов
         for account in accounts:
-            retry_count = 0
-            success = False
-            adjusted_time_str = "N/A"
+            if exit_flag:
+                logger.info("Exit flag detected. Stopping account processing.")
+                break  # Прерываем обработку аккаунтов
 
-            while retry_count < 3 and not success:
-                bot = None  # Объявление bot вне блока try
-                try:
-                    bot = TelegramBotAutomation(account, settings)
-                    active_bots.append(bot)  # Добавляем бот в список для отслеживания
+            try:
+                retry_count = 0
+                success = False
+                adjusted_time_str = "N/A"
 
-                    # Навигация и выполнение задач
-                    if not bot.navigate_to_bot():
-                        raise Exception("Failed to navigate to bot")
-                    if not bot.send_message(settings['TELEGRAM_GROUP_URL']):
-                        raise Exception("Failed to send message")
-                    if not bot.click_link():
-                       raise Exception("Failed to click link")
-                    bot.preparing_account()
-
-                    # Получение баланса
-                    balance = bot.get_balance()
-                    username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
+                while retry_count < 3 and not success:
+                    if exit_flag:
+                        logger.info("Exit flag detected. Stopping account processing.")
+                        break  # Прерываем внутренний цикл
+                    bot = None  # Объявление bot вне блока try
                     try:
-                        balance = float(balance) if isinstance(balance, str) and balance.replace('.', '', 1).isdigit() else float(balance)
-                    except (ValueError, TypeError):
-                        logger.warning(f"Account {account}: Invalid balance format: {balance}. Setting to 0.0.")
-                        balance = 0.0
+                        bot = TelegramBotAutomation(account, settings)
+                        active_bots.append(bot)  # Добавляем бот в список для отслеживания
 
-                    logger.info(f"Account {account}: Final balance after processing: {balance}.")
+                        # Навигация и выполнение задач
+                        if not bot.navigate_to_bot():
+                            raise Exception("Failed to navigate to bot")
+                        if not bot.send_message(settings['TELEGRAM_GROUP_URL']):
+                            raise Exception("Failed to send message")
+                        if not bot.click_link():
+                            raise Exception("Failed to click link")
+                        bot.preparing_account()
+                        # Проверяем квесты
+                        bot.perform_quests()
+                        bot.switch_to_iframe()
+                        # Получение баланса
+                        balance = bot.get_balance()
+                        username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
+                        try:
+                            balance = float(balance) if isinstance(balance, str) and balance.replace('.', '', 1).isdigit() else float(balance)
+                        except (ValueError, TypeError):
+                            logger.warning(f"Account {account}: Invalid balance format: {balance}. Setting to 0.0.")
+                            balance = 0.0
 
-                    # Фермерство (после получения баланса)
-                    bot.farming()
+                        logger.info(f"Account {account}: Final balance after processing: {balance}.")
+                        
+                        # Фермерство (после получения баланса)
+                        bot.farming()
 
-                    # Расчет времени до следующего действия
-                    scheduled_time = bot.get_time()
-                    if ":" in scheduled_time:
-                        hours, minutes, seconds = map(int, scheduled_time.split(':'))
-                        time_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
-                        trigger_time = datetime.now() + time_delta + timedelta(minutes=random.randint(5, 30))
-                        adjusted_time_str = trigger_time.strftime("%Y-%m-%d %H:%M:%S")
-                    else:
-                        raise Exception("Invalid scheduled time format")
+                        # Расчет времени до следующего действия
+                        scheduled_time = bot.get_time()
+                        if ":" in scheduled_time:
+                            hours, minutes, seconds = map(int, scheduled_time.split(':'))
+                            time_delta = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+                            trigger_time = datetime.now() + time_delta + timedelta(minutes=random.randint(5, 30))
+                            adjusted_time_str = trigger_time.strftime("%Y-%m-%d %H:%M:%S")
+                        else:
+                            raise Exception("Invalid scheduled time format")
 
-                    logger.info(f"Account {account}: Adjusted scheduled time for next claim: {adjusted_time_str}")
+                        logger.info(f"Account {account}: Adjusted scheduled time for next claim: {adjusted_time_str}")
 
-                    success = True
+                        success = True
 
-                    # Обновление словаря балансов
-                    with balance_lock:
-                        balance_dict[account] = {
-                            "username": username,
-                            "balance": balance,
-                            "next_schedule": adjusted_time_str,
-                            "status": "Success"
-                        }
-                except Exception as e:
-                    logger.warning(f"Account {account}: Error occurred on attempt {retry_count + 1}: {e}")
-                    retry_count += 1
-                    if retry_count >= 3:
-                        next_retry_time = datetime.now() + timedelta(minutes=random.randint(30, 70))
-                        adjusted_time_str = next_retry_time.strftime("%Y-%m-%d %H:%M:%S")
+                        # Обновление словаря балансов
                         with balance_lock:
                             balance_dict[account] = {
-                                "username": "N/A",
-                                "balance": 0.0,
+                                "username": username,
+                                "balance": balance,
                                 "next_schedule": adjusted_time_str,
-                                "status": "ERROR"
+                                "status": "Success"
                             }
-                        logger.warning(f"Account {account}: Marked as error with next retry at {adjusted_time_str}.")
-                finally:
-                    if bot:
-                        bot.browser_manager.close_browser()
-                        active_bots.remove(bot)  # Удаляем бот из списка после закрытия браузера
-                    sleep_time = random.randint(5, 15)
-                    logger.info(f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
-                    time.sleep(sleep_time)
+                    except Exception as e:
+                        logger.warning(f"Account {account}: Error occurred on attempt {retry_count + 1}: {e}")
+                        retry_count += 1
+                        if retry_count >= 3:
+                            retry_delay = random.randint(1800, 4200)  # 30–70 минут
+                            next_retry_time = datetime.now() + timedelta(seconds=retry_delay)
+                            adjusted_time_str = next_retry_time.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Генерация итоговой таблицы баланса после обработки текущего аккаунта
-            generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True)
+                            with balance_lock:
+                                balance_dict[account] = {
+                                    "username": "N/A",
+                                    "balance": 0.0,
+                                    "next_schedule": adjusted_time_str,
+                                    "status": "ERROR"
+                                }
 
-            # Установка таймера для следующего действия
-            if success and adjusted_time_str != "N/A":
-                trigger_time = datetime.strptime(adjusted_time_str, "%Y-%m-%d %H:%M:%S")
-                timer = threading.Timer(
-                    (trigger_time - datetime.now()).total_seconds(),
-                    process_account_once,
-                    args=(account, balance_dict, active_timers)
-                )
-                active_timers.append(timer)
-                timer.start()
-                logger.info(f"Account {account}: Timer set for {adjusted_time_str}.")
+                            logger.warning(f"Account {account}: Scheduling retry in {retry_delay // 60} minutes at {adjusted_time_str}.")
+
+                            # Устанавливаем таймер для повторной обработки аккаунта
+                            retry_timer = threading.Timer(
+                                retry_delay,
+                                process_account_once,
+                                args=(account, balance_dict, active_timers)
+                            )
+                            active_timers.append(retry_timer)
+                            retry_timer.start()
+                    finally:
+                        if bot:
+                            bot.browser_manager.close_browser()
+                            active_bots.remove(bot)  # Удаляем бот из списка после закрытия браузера
+                        sleep_time = random.randint(5, 15)
+                        logger.info(f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
+                        time.sleep(sleep_time)
+
+                # Генерация итоговой таблицы баланса после обработки текущего аккаунта
+                generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True)
+
+                # Установка таймера для следующего действия
+                if success and adjusted_time_str != "N/A":
+                    trigger_time = datetime.strptime(adjusted_time_str, "%Y-%m-%d %H:%M:%S")
+                    timer = threading.Timer(
+                        (trigger_time - datetime.now()).total_seconds(),
+                        process_account_once,
+                        args=(account, balance_dict, active_timers)
+                    )
+                    active_timers.append(timer)
+                    timer.start()
+                    logger.info(f"Account {account}: Timer set for {adjusted_time_str}.")
+            except Exception as account_error:
+                logger.exception(f"Critical error while processing account {account}: {account_error}")
 
         logger.info("All accounts processed.")
 
         # Ожидание завершения всех таймеров
         logger.info("Waiting for all timers to complete...")
-        for timer in active_timers:
-            timer.join()
+        while not exit_flag and any(t.is_alive() for t in active_timers):
+            time.sleep(1)
 
     except KeyboardInterrupt:
         logger.info("Process interrupted by user. Cancelling all timers and closing browsers...")
+        exit_flag = True  # Устанавливаем флаг завершения
         # Закрытие всех активных браузеров
         for bot in active_bots:
             try:
@@ -273,13 +319,6 @@ def process_accounts():
             if timer.is_alive():
                 timer.cancel()
         logger.info("All timers and browsers cancelled. Exiting gracefully.")
-    except Exception as e:
-        logger.exception(f"Unexpected error: {e}")
-
-
-
-
-
 
 
 def generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True):
