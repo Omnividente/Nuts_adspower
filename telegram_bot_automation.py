@@ -68,7 +68,152 @@ class TelegramBotAutomation:
         # Сохранение экземпляра драйвера
         self.driver = self.browser_manager.driver
 
- 
+    def perform_quests(self):
+        """
+        Выполняет доступные квесты в интерфейсе через Selenium.
+        """
+        logger.info(f"Account {self.serial_number}: Starting quest execution.")
+        processed_quests = set()  # Хранение обработанных кнопок
+
+        try:
+            # Переключаемся в iframe с квестами
+            if not self.switch_to_iframe():
+                logger.error(f"Account {self.serial_number}: Failed to switch to iframe for quests.")
+                return
+
+            while True:
+                try:
+                    # Находим кнопки квестов с наградами
+                    quest_buttons = self.driver.find_elements(By.CSS_SELECTOR, "button.relative.flex.h-\\[74px\\].w-\\[74px\\]")
+                    quest_buttons = [
+                        btn for btn in quest_buttons
+                        if btn not in processed_quests and self.has_reward(btn)
+                    ]
+
+                    if not quest_buttons:
+                        #logger.info(f"Account {self.serial_number}: No more quests available.")
+                        break
+
+                    # Берём первый квест из списка
+                    current_quest = quest_buttons[0]
+                    reward_text = self.get_reward_text(current_quest)
+                    logger.info(f"Account {self.serial_number}: Found quest with reward: {reward_text}")
+
+                    # Нажимаем на кнопку квеста
+                    self.safe_click(current_quest)
+                    processed_quests.add(current_quest)
+
+                    # Выполняем взаимодействие с окном квеста
+                    if self.interact_with_quest_window():
+                        logger.info(f"Account {self.serial_number}: Quest with reward {reward_text} completed.")
+                    else:
+                        logger.warning(f"Account {self.serial_number}: Failed to complete quest with reward {reward_text}. Retrying.")
+                        break  # Если квест не завершён, прерываем выполнение
+                except Exception as e:
+                    logger.error(f"Account {self.serial_number}: Error while performing quest: {str(e)}")
+                    break
+        finally:
+            # Возвращаемся к главному контенту
+            self.driver.switch_to.default_content()
+            logger.info(f"Account {self.serial_number}: Completed all quests.")
+
+
+
+
+
+
+    def has_reward(self, button):
+        """
+        Проверяет, содержит ли кнопка квеста награду.
+        """
+        try:
+            reward_div = button.find_element(By.CSS_SELECTOR, "div.absolute.-bottom-2.-left-2.z-50")
+            reward_text = reward_div.text.strip()
+            return bool(reward_text and reward_text.startswith("+"))
+        except Exception:
+            return False
+
+
+    def get_reward_text(self, button):
+        """
+        Получает текст награды из кнопки квеста.
+        """
+        try:
+            reward_div = button.find_element(By.CSS_SELECTOR, "div.absolute.-bottom-2.-left-2.z-50")
+            return reward_div.text.strip()
+        except Exception:
+            return "Unknown"
+
+
+    def interact_with_quest_window(self):
+        """
+        Взаимодействует с окном квеста до его закрытия.
+        """
+        try:
+            # Ожидаем появления окна квеста
+            quest_window = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//div[contains(@style, 'position: absolute; height: inherit; width: inherit;')]"))
+            )
+            #logger.info(f"Account {self.serial_number}: Quest window detected. Starting interaction.")
+
+            retries = 0  # Счётчик попыток
+            while retries < 10:  # Ограничение на 10 попыток взаимодействия
+                # Проверяем, закрыто ли окно квеста
+                quest_window = self.driver.find_elements(By.XPATH, "//div[contains(@style, 'position: absolute; height: inherit; width: inherit;')]")
+                if not quest_window:
+                    logger.info(f"Account {self.serial_number}: Quest window closed. Interaction complete.")
+                    return True  # Окно квеста успешно закрыто
+
+                # Пытаемся найти элемент для клика в правой половине
+                quest_element = self.wait_for_element(By.XPATH, "/html/body/div[5]/div/div[3]/div[2]", timeout=5)
+                if quest_element:
+                    self.safe_click(quest_element)
+                    #logger.info(f"Account {self.serial_number}: Clicked on the right side of the quest window.")
+                else:
+                    logger.warning(f"Account {self.serial_number}: Right-side element not found. Retrying.")
+                    retries += 1
+                    time.sleep(1)
+                    continue
+
+                # Проверяем снова, закрыто ли окно после клика
+                time.sleep(1)  # Небольшая пауза для обновления состояния
+                updated_quest_window = self.driver.find_elements(By.XPATH, "//div[contains(@style, 'position: absolute; height: inherit; width: inherit;')]")
+                if not updated_quest_window:
+                    #logger.info(f"Account {self.serial_number}: Quest window successfully closed after click.")
+                    return True
+
+                retries += 1
+                time.sleep(1)  # Пауза перед следующей попыткой
+
+            # Если после 10 попыток окно не закрылось
+            logger.warning(f"Account {self.serial_number}: Quest window did not close after maximum retries.")
+            return False
+        except TimeoutException:
+            logger.warning(f"Account {self.serial_number}: Quest window did not appear in time.")
+            return False
+        except Exception as e:
+            logger.error(f"Account {self.serial_number}: Error interacting with quest window: {str(e)}")
+            return False
+
+
+
+
+    def safe_click(self, element):
+        """
+        Безопасный клик по элементу.
+        """
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(element))
+            element.click()
+        except Exception:
+            try:
+                self.driver.execute_script("arguments[0].click();", element)
+            except Exception:
+                pass
+
+
+
     def navigate_to_bot(self):
         retries = 0
         while retries < self.MAX_RETRIES:
