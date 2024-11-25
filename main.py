@@ -68,11 +68,13 @@ exit_flag = False  # Глобальный флаг для выхода из пр
 def process_account_once(account, balance_dict, active_timers):
     global exit_flag  # Доступ к глобальному флагу завершения
 
-    # Проверяем активные таймеры, чтобы избежать дублирования
-    active_timers[:] = [t for t in active_timers if t.is_alive()]  # Убираем завершённые таймеры из списка
-    if account in [t.args[0] for t in active_timers]:
-        logger.info(f"Account {account}: Existing timer already active. Skipping duplicate processing.")
-        return
+    # Удаляем завершённые таймеры
+    active_timers[:] = [t for t in active_timers if t.is_alive()]
+    logger.debug(f"Active timers after cleanup: {[t.is_alive() for t in active_timers]}")
+
+    # Удаляем таймеры для текущего аккаунта
+    active_timers[:] = [t for t in active_timers if t.args[0] != account]
+    logger.debug(f"Timers for account {account} removed before starting processing.")
 
     # Проверяем, установлен ли флаг завершения
     if exit_flag:
@@ -80,6 +82,7 @@ def process_account_once(account, balance_dict, active_timers):
         return
 
     logger.info(f"Scheduled processing for account {account}. Starting...")
+
     try:
         bot = TelegramBotAutomation(account, settings)
 
@@ -159,7 +162,6 @@ def process_account_once(account, balance_dict, active_timers):
     # Вывод обновлённой таблицы после обработки аккаунта
     if not exit_flag:
         generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True)
-
 
 
 def process_accounts():
