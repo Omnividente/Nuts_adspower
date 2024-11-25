@@ -115,6 +115,7 @@ class TelegramBotAutomation:
         finally:
             # Возвращаемся к главному контенту
             self.driver.switch_to.default_content()
+            self.switch_to_iframe()
             logger.info(f"Account {self.serial_number}: Completed all quests.")
 
 
