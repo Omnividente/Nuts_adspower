@@ -216,7 +216,7 @@ def process_accounts():
                         bot.preparing_account()
                         # Проверяем квесты
                         bot.perform_quests()
-                        bot.switch_to_iframe()
+                        
                         # Получение баланса
                         balance = bot.get_balance()
                         username = bot.get_username() if hasattr(bot, 'get_username') else "N/A"
