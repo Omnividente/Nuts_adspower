@@ -116,8 +116,12 @@ def process_account_once(account, balance_dict, active_timers):
         else:
             scheduled_time = datetime.now() + timedelta(hours=8)  # Если время недоступно, добавить 8 часов.
 
+        # Добавляем случайное время от 5 до 30 минут
+        additional_delay = timedelta(minutes=random.randint(5, 30))
+        scheduled_time += additional_delay
+
         next_schedule = scheduled_time.strftime("%Y-%m-%d %H:%M:%S")
-        logger.info(f"Account {account}: Next scheduled time: {next_schedule}")
+        logger.info(f"Account {account}: Next scheduled time (with random delay): {next_schedule}")
 
         # Обновляем словарь с балансами
         with balance_lock:
@@ -325,7 +329,8 @@ def process_accounts():
 
 def generate_and_display_balance_table(balance_dict, show_total=True, colored_output=True):
     """
-    Генерирует таблицу балансов и выводит её в лог. Возвращает итоговый баланс, таблицу и список текущих балансов.
+    Генерирует таблицу балансов и выводит её в лог. Возвращает итоговый баланс, таблицу и список текущих балансов,
+    отсортированных по времени следующего запуска.
     
     :param balance_dict: Словарь с данными о балансе аккаунтов.
     :param show_total: Если True, выводит общий баланс.
@@ -338,7 +343,14 @@ def generate_and_display_balance_table(balance_dict, show_total=True, colored_ou
     current_balances = []  # Список для хранения балансов
 
     with balance_lock:
-        for account, data in balance_dict.items():
+        # Сортируем словарь по времени следующего запуска
+        sorted_accounts = sorted(
+            balance_dict.items(),
+            key=lambda item: datetime.strptime(item[1]["next_schedule"], "%Y-%m-%d %H:%M:%S")
+            if item[1]["next_schedule"] != "N/A" else datetime.max
+        )
+
+        for account, data in sorted_accounts:
             row = [account, data["username"], data["balance"], data["next_schedule"], data["status"]]
             
             if colored_output:
@@ -366,6 +378,7 @@ def generate_and_display_balance_table(balance_dict, show_total=True, colored_ou
         logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:,.2f}{Style.RESET_ALL}")
 
     return current_balances, str(table), total_balance
+
 
 
 
