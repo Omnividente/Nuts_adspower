@@ -28,7 +28,7 @@ def load_settings():
 settings = load_settings()
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 #logger.setLevel(logging.DEBUG)
 
 if not logger.hasHandlers():
