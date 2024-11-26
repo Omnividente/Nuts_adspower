@@ -8,8 +8,6 @@ from prettytable import PrettyTable
 from datetime import datetime, timedelta
 from threading import Timer, Lock
 from update_manager import UpdateManager
-import os
-
 
 # Загрузка настроек
 def load_settings():
@@ -62,15 +60,9 @@ if not logger.hasHandlers():
 balance_dict = {}
 balance_lock = Lock()
 exit_flag = False
-active_browsers = []
+active_bots = []
 
-def create_telegram_bot(account, settings):
-    """
-    Создаёт объект TelegramBotAutomation и добавляет его браузер в active_browsers.
-    """
-    bot = TelegramBotAutomation(account, settings)
-    active_browsers.append(bot.browser_manager)  # Сохраняем ссылку на браузер
-    return bot
+
 # Основная обработка аккаунта
 def process_account(account, balance_dict, active_timers):
     global exit_flag
@@ -82,8 +74,8 @@ def process_account(account, balance_dict, active_timers):
     while retry_count < 3 and not success and not exit_flag:
         try:
             # Инициализация объекта TelegramBotAutomation для каждой попытки
-            bot = create_telegram_bot(account, settings)
-
+            bot = TelegramBotAutomation(account, settings)
+            active_bots.append(bot)  # Добавляем объект в список активных ботов
             # Навигация и выполнение задач
             navigate_and_perform_actions(bot)
 
@@ -114,6 +106,7 @@ def process_account(account, balance_dict, active_timers):
             try:
                 if bot:
                     bot.browser_manager.close_browser()  # Закрываем браузер
+                    active_bots.remove(bot)  # Удаляем объект из списка активных ботов
             except Exception as e:
                 logger.warning(f"Failed to close browser for account {account}: {e}")
             time.sleep(random.randint(5, 15))  # Пауза между попытками
@@ -259,28 +252,6 @@ def generate_and_display_balance_table(balance_dict, show_total=True):
     logger.info("\nCurrent Balance Table:\n" + str(table))
     if show_total:
         logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:d}{Style.RESET_ALL}")
-def close_all_browsers():
-    """Закрывает все активные браузеры."""
-    for browser_manager in list(active_browsers):  # Создаём копию списка для безопасной итерации
-        try:
-            if hasattr(browser_manager, 'close_browser'):  # Проверяем наличие метода close_browser
-                browser_manager.close_browser()
-                logger.info("Browser closed successfully.")
-            else:
-                logger.warning("BrowserManager does not have 'close_browser' method.")
-        except Exception as e:
-            logger.warning(f"Failed to close browser: {e}")
-        finally:
-            active_browsers.remove(browser_manager)  # Удаляем из списка
-def wait_for_timers_to_finish(active_timers):
-    """Ожидает завершения всех таймеров."""
-    for timer in active_timers:
-        if timer.is_alive():
-            try:
-                logger.info(f"Waiting for timer {timer} to finish...")
-                timer.join()  # Ожидание завершения таймера
-            except Exception as e:
-                logger.warning(f"Failed to wait for timer {timer}: {e}")            
 
 
 
@@ -292,7 +263,7 @@ if __name__ == "__main__":
 
         # Планируем периодическую проверку обновлений
         update_manager.schedule_update_check()
-
+        #
         reset_balances()
         accounts = read_accounts_from_file()
         random.shuffle(accounts)
@@ -335,16 +306,18 @@ if __name__ == "__main__":
             if timer.is_alive():
                 timer.cancel()
 
-        # Ожидание завершения всех таймеров
-        wait_for_timers_to_finish(active_timers)
-
         # Закрытие всех активных браузеров
         logger.info("Closing all active browsers...")
-        close_all_browsers()
+        for bot in list(active_bots):  # Копируем список, чтобы избежать изменений во время итерации
+            try:
+                bot.browser_manager.close_browser()  # Закрываем браузер
+                logger.info(f"Browser for bot {bot} closed successfully.")
+            except Exception as e:
+                logger.warning(f"Failed to close browser: {e}")
+            finally:
+                active_bots.remove(bot)  # Удаляем бота из списка после закрытия
 
         logger.info("All resources cleaned up. Exiting gracefully.")
-        os._exit(0)
-
 
 
 
