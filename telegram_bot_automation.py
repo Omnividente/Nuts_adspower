@@ -423,8 +423,8 @@ class TelegramBotAutomation:
 
     def farming(self):
         actions = [
-            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button", "'Start farming' button clicked", "'Start farming' button is not active. Farm probably already started."),
-            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button", "'Collect' button clicked", "'Collect' button is not active. Farm probably already started.")
+            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button", "'Start farming' button clicked", "'Start farming' button is not active."),
+            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button", "'Collect' button clicked", "'Collect' button is not active.")
         ]
 
         for xpath, success_msg, fail_msg in actions:
