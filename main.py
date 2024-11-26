@@ -259,14 +259,18 @@ def generate_and_display_balance_table(balance_dict, show_total=True):
         logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:d}{Style.RESET_ALL}")
 def close_all_browsers():
     """Закрывает все активные браузеры."""
-    for browser in list(active_browsers):  # Создаём копию списка для безопасной итерации
+    for browser_manager in list(active_browsers):  # Создаём копию списка для безопасной итерации
         try:
-            browser.quit()  # Закрытие браузера
-            logger.info("Browser closed successfully.")
+            if hasattr(browser_manager, 'close_browser'):  # Проверяем наличие метода close_browser
+                browser_manager.close_browser()
+                logger.info("Browser closed successfully.")
+            else:
+                logger.warning("BrowserManager does not have 'close_browser' method.")
         except Exception as e:
             logger.warning(f"Failed to close browser: {e}")
         finally:
-            active_browsers.remove(browser)  # Удаляем браузер из списка
+            active_browsers.remove(browser_manager)  # Удаляем из списка
+
 
 
 
