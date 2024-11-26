@@ -261,7 +261,7 @@ if __name__ == "__main__":
 
         # Планируем периодическую проверку обновлений
         update_manager.schedule_update_check()
-        #
+
         reset_balances()
         accounts = read_accounts_from_file()
         random.shuffle(accounts)
@@ -297,13 +297,27 @@ if __name__ == "__main__":
         logger.info("Exiting on user interrupt...")
         exit_flag = True
         update_manager.save_timers_to_file(balance_dict)
+
         # Остановка всех таймеров
         logger.info("Cancelling all timers...")
         for timer in active_timers:
             if timer.is_alive():
                 timer.cancel()
 
+        # Закрытие браузеров через таймеры
+        logger.info("Closing browsers for remaining timers...")
+        for timer in active_timers:
+            try:
+                args = timer.args  # Получаем аргументы, переданные в таймер
+                account = args[0]
+                bot = TelegramBotAutomation(account, settings)
+                bot.browser_manager.close_browser()
+                logger.info(f"Closed browser for account {account}.")
+            except Exception as e:
+                logger.warning(f"Failed to close browser for timer: {e}")
+
         logger.info("All resources cleaned up. Exiting gracefully.")
+
 
 
 
