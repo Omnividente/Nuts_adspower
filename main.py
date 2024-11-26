@@ -8,6 +8,7 @@ from prettytable import PrettyTable
 from datetime import datetime, timedelta
 from threading import Timer, Lock
 from update_manager import UpdateManager
+import os
 
 # Загрузка настроек
 def load_settings():
@@ -253,6 +254,12 @@ def generate_and_display_balance_table(balance_dict, show_total=True):
     if show_total:
         logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:d}{Style.RESET_ALL}")
 
+def wait_for_timers_to_finish(active_timers):
+    """Ожидает завершения всех таймеров."""
+    for timer in active_timers:
+        if timer.is_alive():
+            logger.info(f"Waiting for timer {timer} to finish...")
+            timer.join()  # Ожидаем завершения таймера
 
 
 
@@ -308,16 +315,22 @@ if __name__ == "__main__":
 
         # Закрытие всех активных браузеров
         logger.info("Closing all active browsers...")
-        for bot in list(active_bots):  # Копируем список, чтобы избежать изменений во время итерации
+        for bot in list(active_bots):
             try:
-                bot.browser_manager.close_browser()  # Закрываем браузер
+                bot.browser_manager.close_browser()
                 logger.info(f"Browser for bot {bot} closed successfully.")
             except Exception as e:
                 logger.warning(f"Failed to close browser: {e}")
             finally:
-                active_bots.remove(bot)  # Удаляем бота из списка после закрытия
+                active_bots.remove(bot)
 
-        logger.info("All resources cleaned up. Exiting gracefully.")
+        # Лог активных потоков
+        logger.info("Logging active threads before exit...")
+        log_active_threads()
+
+        # Принудительное завершение
+        logger.info("All resources cleaned up. Forcing exit...")
+        os._exit(0)
 
 
 
