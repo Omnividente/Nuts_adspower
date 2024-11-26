@@ -270,6 +270,15 @@ def close_all_browsers():
             logger.warning(f"Failed to close browser: {e}")
         finally:
             active_browsers.remove(browser_manager)  # Удаляем из списка
+def wait_for_timers_to_finish(active_timers):
+    """Ожидает завершения всех таймеров."""
+    for timer in active_timers:
+        if timer.is_alive():
+            try:
+                logger.info(f"Waiting for timer {timer} to finish...")
+                timer.join()  # Ожидание завершения таймера
+            except Exception as e:
+                logger.warning(f"Failed to wait for timer {timer}: {e}")            
 
 
 
@@ -324,11 +333,15 @@ if __name__ == "__main__":
             if timer.is_alive():
                 timer.cancel()
 
+        # Ожидание завершения всех таймеров
+        wait_for_timers_to_finish(active_timers)
+
         # Закрытие всех активных браузеров
         logger.info("Closing all active browsers...")
         close_all_browsers()
 
         logger.info("All resources cleaned up. Exiting gracefully.")
+
 
 
 
