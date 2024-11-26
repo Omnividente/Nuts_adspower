@@ -8,6 +8,8 @@ from prettytable import PrettyTable
 from datetime import datetime, timedelta
 from threading import Timer, Lock
 from update_manager import UpdateManager
+import os
+
 
 # Загрузка настроек
 def load_settings():
@@ -341,6 +343,7 @@ if __name__ == "__main__":
         close_all_browsers()
 
         logger.info("All resources cleaned up. Exiting gracefully.")
+        os._exit(0)
 
 
 
