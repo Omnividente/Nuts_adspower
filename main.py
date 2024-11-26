@@ -60,8 +60,15 @@ if not logger.hasHandlers():
 balance_dict = {}
 balance_lock = Lock()
 exit_flag = False
+active_browsers = []
 
-
+def create_telegram_bot(account, settings):
+    """
+    Создаёт объект TelegramBotAutomation и добавляет его браузер в active_browsers.
+    """
+    bot = TelegramBotAutomation(account, settings)
+    active_browsers.append(bot.browser_manager)  # Сохраняем ссылку на браузер
+    return bot
 # Основная обработка аккаунта
 def process_account(account, balance_dict, active_timers):
     global exit_flag
@@ -73,7 +80,7 @@ def process_account(account, balance_dict, active_timers):
     while retry_count < 3 and not success and not exit_flag:
         try:
             # Инициализация объекта TelegramBotAutomation для каждой попытки
-            bot = TelegramBotAutomation(account, settings)
+            bot = create_telegram_bot(account, settings)
 
             # Навигация и выполнение задач
             navigate_and_perform_actions(bot)
@@ -250,7 +257,16 @@ def generate_and_display_balance_table(balance_dict, show_total=True):
     logger.info("\nCurrent Balance Table:\n" + str(table))
     if show_total:
         logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:d}{Style.RESET_ALL}")
-
+def close_all_browsers():
+    """Закрывает все активные браузеры."""
+    for browser in list(active_browsers):  # Создаём копию списка для безопасной итерации
+        try:
+            browser.quit()  # Закрытие браузера
+            logger.info("Browser closed successfully.")
+        except Exception as e:
+            logger.warning(f"Failed to close browser: {e}")
+        finally:
+            active_browsers.remove(browser)  # Удаляем браузер из списка
 
 
 
@@ -304,17 +320,9 @@ if __name__ == "__main__":
             if timer.is_alive():
                 timer.cancel()
 
-        # Закрытие браузеров через таймеры
-        logger.info("Closing browsers for remaining timers...")
-        for timer in active_timers:
-            try:
-                args = timer.args  # Получаем аргументы, переданные в таймер
-                account = args[0]
-                bot = TelegramBotAutomation(account, settings)
-                bot.browser_manager.close_browser()
-                logger.info(f"Closed browser for account {account}.")
-            except Exception as e:
-                logger.warning(f"Failed to close browser for timer: {e}")
+        # Закрытие всех активных браузеров
+        logger.info("Closing all active browsers...")
+        close_all_browsers()
 
         logger.info("All resources cleaned up. Exiting gracefully.")
 
