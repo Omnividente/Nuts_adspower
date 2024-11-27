@@ -246,13 +246,17 @@ class UpdateManager:
 
 
     def restart_script(self):
-        global TEMP_UPDATE_FLAG
         """Перезапускает текущий скрипт."""
         logger.info("Restarting script to apply updates...")
-        with open(TEMP_UPDATE_FLAG, "w") as f:
-            f.write("1")
-        python = sys.executable
-        os.execl(python, python, *sys.argv)
+        try:
+            # Создаём временный флаг
+            with open(TEMP_UPDATE_FLAG, "w") as f:
+                f.write("skip_update_check")
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
+        except Exception as e:
+            logger.error(f"Error during restart: {e}")
+
     
     def check_update_flag():
         """Проверяет наличие временного файла-флага."""
