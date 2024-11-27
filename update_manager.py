@@ -117,55 +117,66 @@ class UpdateManager:
         :param file_name: Имя файла для формирования ссылки.
         :return: Преобразованный raw URL.
         """
+        logger.debug(f"Original repo URL: {repo_url}, file name: {file_name}")
+
         # Убираем ".git" и обрабатываем SSH-ссылки
         if repo_url.endswith(".git"):
             repo_url = repo_url.replace(".git", "")
+            logger.debug(f"Removed '.git': {repo_url}")
         if repo_url.startswith("git@github.com:"):
             repo_url = repo_url.replace("git@github.com:", "https://github.com/")
+            logger.debug(f"Converted SSH to HTTPS: {repo_url}")
 
         # Используем ветку по умолчанию
-        branch = self.settings.get("DEFAULT_BRANCH", "main")  # "main" — ветка по умолчанию
+        branch = self.settings.get("DEFAULT_BRANCH", "main")
+        logger.debug(f"Using branch: {branch}")
+
         raw_url = repo_url.replace("github.com", "raw.githubusercontent.com")
         raw_url = f"{raw_url}/{branch}/{file_name.strip()}"
+        logger.debug(f"Constructed raw URL: {raw_url}")
 
-        return raw_url    
+        return raw_url
+    
 
     def update_file(self, file_name):
         """Обновляет файл, если он изменился."""
         if not self.repo_url:
-            logger.warning("REPO_URL is not configured in settings.")
-            return False
-
-        remote_url = self.convert_to_raw_url(f"{self.repo_url}/{file_name.strip()}")
-        local_path = os.path.join(self.local_dir, file_name.strip())
-
-        logger.info(f"Checking for updates to {file_name}...")
+            logger.warning(f"REPO_URL is not configured in settings for {file_name}.")
+            return "REPO_URL Missing"
 
         try:
+            # Передаём оба аргумента: repo_url и file_name
+            remote_url = self.convert_to_raw_url(self.repo_url, file_name)
+            local_path = os.path.join(self.local_dir, file_name.strip())
+
+            logger.info(f"Checking for updates to {file_name} from {remote_url}...")
+
             # Проверяем удалённый и локальный хэши
             remote_hash = self.get_remote_file_hash(remote_url)
             local_hash = self.get_local_file_hash(local_path)
+
+            logger.debug(f"Remote hash: {remote_hash}, Local hash: {local_hash}")
 
             if remote_hash and remote_hash != local_hash:
                 logger.info(f"Updating file {file_name}...")
                 response = requests.get(remote_url)
                 response.raise_for_status()
 
-                try:
-                    with open(local_path, "wb") as f:
-                        f.write(response.content)
-                    logger.info(f"File {file_name} updated successfully.")
-                    return True
-                except PermissionError as e:
-                    logger.error(f"Permission denied while updating {file_name}: {e}")
-                    return False
+                with open(local_path, "wb") as f:
+                    f.write(response.content)
+                logger.info(f"File {file_name} updated successfully.")
+                return "Updated"
             else:
                 logger.info(f"No updates found for {file_name}.")
-                return False
+                return "No Changes"
 
         except requests.RequestException as e:
-            logger.error(f"Error updating file {file_name}: {e}")
-            return False
+            logger.error(f"Error downloading {file_name} from {remote_url}: {e}")
+            return "Download Error"
+        except Exception as e:
+            logger.error(f"Unexpected error for {file_name}: {e}")
+            return "Unexpected Error"
+
 
 
 
