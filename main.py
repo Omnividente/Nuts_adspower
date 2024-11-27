@@ -7,7 +7,7 @@ from colorama import Fore, Style
 from prettytable import PrettyTable
 from datetime import datetime, timedelta
 from threading import Timer, Lock
-from update_manager import UpdateManager
+
 
 # Загрузка настроек
 def load_settings():
@@ -24,9 +24,6 @@ def load_settings():
     return settings
 
 settings = load_settings()
-
-# Создание объекта UpdateManager
-update_manager = UpdateManager(settings)
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -115,7 +112,7 @@ def process_account(account, balance_dict, active_timers):
     # Вызов таблицы после обработки аккаунта
     generate_and_display_balance_table(balance_dict, show_total=True)
 
-update_manager.restore_timers(balance_dict, process_account)
+
 
 
 
@@ -256,12 +253,6 @@ def generate_and_display_balance_table(balance_dict, show_total=True):
 
 if __name__ == "__main__":
     try:
-        # Проверяем обновления перед запуском основного цикла
-        update_manager.check_and_update_all()
-
-        # Планируем периодическую проверку обновлений
-        update_manager.schedule_update_check()
-        #
         reset_balances()
         accounts = read_accounts_from_file()
         random.shuffle(accounts)
@@ -296,7 +287,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Exiting on user interrupt...")
         exit_flag = True
-        update_manager.save_timers_to_file(balance_dict)
+
         # Остановка всех таймеров
         logger.info("Cancelling all timers...")
         for timer in active_timers:
