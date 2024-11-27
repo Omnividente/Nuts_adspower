@@ -8,7 +8,6 @@ from prettytable import PrettyTable
 from datetime import datetime, timedelta
 from threading import Timer, Lock
 
-
 # Загрузка настроек
 def load_settings():
     settings = {}
