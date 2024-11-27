@@ -58,27 +58,26 @@ class UpdateManager:
             return False
 
         try:
-            # Пробуем выполнить git pull
+            # Сбрасываем локальные изменения
+            logger.info("Resetting local changes...")
+            subprocess.check_output(["git", "reset", "--hard"], stderr=subprocess.STDOUT, text=True)
+            subprocess.check_output(["git", "clean", "-f"], stderr=subprocess.STDOUT, text=True)
+
+            # Выполняем pull для получения изменений
+            logger.info("Pulling updates from Git...")
             result = subprocess.check_output(["git", "pull"], stderr=subprocess.STDOUT, text=True)
             logger.info(f"Git output:\n{result}")
-            
-            if "Aborting" in result:
-                logger.warning("Git aborted the update due to conflicts. Attempting to reset and pull again...")
-                # Принудительный сброс локальных изменений
-                subprocess.check_output(["git", "reset", "--hard"], stderr=subprocess.STDOUT, text=True)
-                subprocess.check_output(["git", "pull"], stderr=subprocess.STDOUT, text=True)
-                logger.info("Git update completed successfully after reset.")
-                return True
 
             if "Already up to date." not in result:
                 logger.info("Script updated successfully via Git.")
                 return True  # Обновление выполнено
             else:
                 logger.info("No updates found via Git.")
-                return False  # Обновления нет
+                return False  # Обновлений нет
         except subprocess.CalledProcessError as e:
             logger.error(f"Error updating with Git:\n{e.output}")
             return False  # Ошибка при обновлении
+
 
     def get_remote_file_hash(self, file_url):
         """Получает хэш удалённого файла (MD5)."""
@@ -253,6 +252,13 @@ class UpdateManager:
             f.write("1")
         python = sys.executable
         os.execl(python, python, *sys.argv)
+    
+    def check_update_flag():
+        """Проверяет наличие временного файла-флага."""
+        if os.path.exists(TEMP_UPDATE_FLAG):
+            os.remove(TEMP_UPDATE_FLAG)  # Удаляем флаг
+            return True
+        return False
 
     def save_timers_to_file(self, balance_dict):
         """Сохраняет активные таймеры в файл."""
