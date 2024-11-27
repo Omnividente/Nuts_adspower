@@ -57,8 +57,18 @@ class UpdateManager:
             return False
 
         try:
+            # Пробуем выполнить git pull
             result = subprocess.check_output(["git", "pull"], stderr=subprocess.STDOUT, text=True)
             logger.info(f"Git output:\n{result}")
+            
+            if "Aborting" in result:
+                logger.warning("Git aborted the update due to conflicts. Attempting to reset and pull again...")
+                # Принудительный сброс локальных изменений
+                subprocess.check_output(["git", "reset", "--hard"], stderr=subprocess.STDOUT, text=True)
+                subprocess.check_output(["git", "pull"], stderr=subprocess.STDOUT, text=True)
+                logger.info("Git update completed successfully after reset.")
+                return True
+
             if "Already up to date." not in result:
                 logger.info("Script updated successfully via Git.")
                 return True  # Обновление выполнено
@@ -67,7 +77,7 @@ class UpdateManager:
                 return False  # Обновления нет
         except subprocess.CalledProcessError as e:
             logger.error(f"Error updating with Git:\n{e.output}")
-            return False
+            return False  # Ошибка при обновлении
 
     def get_remote_file_hash(self, file_url):
         """Получает хэш удалённого файла (MD5)."""
@@ -126,36 +136,37 @@ class UpdateManager:
             logger.warning("REPO_URL is not configured in settings.")
             return False
 
-        # Генерируем raw-ссылку для файла
-        remote_url = self.convert_to_raw_url(self.repo_url, file_name.strip())
+        remote_url = self.convert_to_raw_url(f"{self.repo_url}/{file_name.strip()}")
         local_path = os.path.join(self.local_dir, file_name.strip())
 
-        logger.info(f"Checking for updates to {file_name} from {remote_url}...")
+        logger.info(f"Checking for updates to {file_name}...")
 
-        remote_hash = self.get_remote_file_hash(remote_url)
-        local_hash = self.get_local_file_hash(local_path)
+        try:
+            # Проверяем удалённый и локальный хэши
+            remote_hash = self.get_remote_file_hash(remote_url)
+            local_hash = self.get_local_file_hash(local_path)
 
-        if remote_hash and remote_hash != local_hash:
-            logger.info(f"Updating file {file_name}...")
-            try:
+            if remote_hash and remote_hash != local_hash:
+                logger.info(f"Updating file {file_name}...")
                 response = requests.get(remote_url)
                 response.raise_for_status()
-                with open(local_path, "wb") as f:
-                    f.write(response.content)
-                logger.info(f"File {file_name} updated successfully.")
 
-                # Перезапуск, если обновился сам update_manager.py
-                if file_name.strip() == "update_manager.py":
-                    logger.info("update_manager.py updated. Restarting script...")
-                    self.restart_script()
-
-                return True
-            except requests.RequestException as e:
-                logger.error(f"Error updating file {file_name}: {e}")
+                try:
+                    with open(local_path, "wb") as f:
+                        f.write(response.content)
+                    logger.info(f"File {file_name} updated successfully.")
+                    return True
+                except PermissionError as e:
+                    logger.error(f"Permission denied while updating {file_name}: {e}")
+                    return False
+            else:
+                logger.info(f"No updates found for {file_name}.")
                 return False
-        else:
-            logger.info(f"No updates found for {file_name}.")
+
+        except requests.RequestException as e:
+            logger.error(f"Error updating file {file_name}: {e}")
             return False
+
 
 
 
