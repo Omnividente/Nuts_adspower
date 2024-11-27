@@ -21,7 +21,7 @@ if not logger.hasHandlers():
     logger.addHandler(handler)
 
 TIMER_FILE = "timers.json"
-
+TEMP_UPDATE_FLAG = "temp_update_flag"
 
 class UpdateManager:
     TEMP_UPDATE_FLAG = "update_in_progress"
