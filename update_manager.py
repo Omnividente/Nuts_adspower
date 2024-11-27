@@ -24,7 +24,6 @@ TIMER_FILE = "timers.json"
 
 
 class UpdateManager:
-    
     def __init__(self, settings):
         """
         :param settings: Словарь настроек, загружаемый из settings.txt.

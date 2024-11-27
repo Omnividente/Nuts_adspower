@@ -8,7 +8,6 @@ from prettytable import PrettyTable
 from datetime import datetime, timedelta
 from threading import Timer, Lock
 from update_manager import UpdateManager
-import os
 
 # Загрузка настроек
 def load_settings():
@@ -61,7 +60,6 @@ if not logger.hasHandlers():
 balance_dict = {}
 balance_lock = Lock()
 exit_flag = False
-active_bots = []
 
 
 # Основная обработка аккаунта
@@ -76,7 +74,7 @@ def process_account(account, balance_dict, active_timers):
         try:
             # Инициализация объекта TelegramBotAutomation для каждой попытки
             bot = TelegramBotAutomation(account, settings)
-            active_bots.append(bot)  # Добавляем объект в список активных ботов
+
             # Навигация и выполнение задач
             navigate_and_perform_actions(bot)
 
@@ -107,7 +105,6 @@ def process_account(account, balance_dict, active_timers):
             try:
                 if bot:
                     bot.browser_manager.close_browser()  # Закрываем браузер
-                    active_bots.remove(bot)  # Удаляем объект из списка активных ботов
             except Exception as e:
                 logger.warning(f"Failed to close browser for account {account}: {e}")
             time.sleep(random.randint(5, 15))  # Пауза между попытками
@@ -254,40 +251,17 @@ def generate_and_display_balance_table(balance_dict, show_total=True):
     if show_total:
         logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:d}{Style.RESET_ALL}")
 
-def wait_for_timers_to_finish(active_timers):
-    """Ожидает завершения всех таймеров."""
-    for timer in active_timers:
-        if timer.is_alive():
-            logger.info(f"Waiting for timer {timer} to finish...")
-            timer.join()  # Ожидаем завершения таймера
 
-def log_active_threads():
-    """Логирует активные потоки."""
-    threads = threading.enumerate()
-    logger.info(f"Active threads: {len(threads)}")
-    for thread in threads:
-        logger.info(f"Thread {thread.name} - Daemon: {thread.daemon}")
-def send_message_with_retries(bot, message, retries=3):
-    for attempt in range(retries):
-        try:
-            return bot.send_message(message)
-        except Exception as e:
-            logger.warning(f"Attempt {attempt + 1} failed: {e}")
-            time.sleep(5)  # Задержка перед повторной попыткой
-    raise Exception("Failed to send message after retries")
-def close_browser(self):
-    try:
-        self.driver.quit()  # Закрывает весь браузер
-        logger.info("Browser closed successfully.")
-    except Exception as e:
-        logger.warning(f"Error closing browser: {e}")
+
 
 if __name__ == "__main__":
     try:
         # Проверяем обновления перед запуском основного цикла
         update_manager.check_and_update_all()
-        update_manager.schedule_update_check()
 
+        # Планируем периодическую проверку обновлений
+        update_manager.schedule_update_check()
+        #
         reset_balances()
         accounts = read_accounts_from_file()
         random.shuffle(accounts)
@@ -303,10 +277,12 @@ if __name__ == "__main__":
                 break
 
             try:
+                # Передаём обработку аккаунта в process_account
                 process_account(account, balance_dict, active_timers)
             except Exception as e:
                 logger.warning(f"Error while processing account {account}: {e}")
 
+        # Генерация таблицы после завершения обработки всех аккаунтов
         logger.info("Generating final balance table...")
         generate_and_display_balance_table(balance_dict, show_total=True)
 
@@ -315,37 +291,19 @@ if __name__ == "__main__":
             time.sleep(1)
 
         logger.info("Restarting the cycle in 5 minutes...")
-        time.sleep(300)
+        time.sleep(300)  # 5 минут
 
     except KeyboardInterrupt:
-        try:
-            logger.info("Exiting on user interrupt...")
-            exit_flag = True
-            update_manager.save_timers_to_file(balance_dict)
+        logger.info("Exiting on user interrupt...")
+        exit_flag = True
+        update_manager.save_timers_to_file(balance_dict)
+        # Остановка всех таймеров
+        logger.info("Cancelling all timers...")
+        for timer in active_timers:
+            if timer.is_alive():
+                timer.cancel()
 
-            logger.info("Cancelling all timers...")
-            for timer in active_timers:
-                if timer.is_alive():
-                    timer.cancel()
-
-            logger.info("Closing all active browsers...")
-            for bot in list(active_bots):
-                try:
-                    bot.browser_manager.close_browser()
-                    logger.info(f"Browser for bot {bot} closed successfully.")
-                except Exception as e:
-                    logger.warning(f"Failed to close browser: {e}")
-                finally:
-                    active_bots.remove(bot)
-
-            logger.info("Logging active threads before exit...")
-            log_active_threads()
-
-            logger.info("All resources cleaned up. Exiting gracefully.")
-        finally:
-            os._exit(0)  # Принудительное завершение программы
-
-
+        logger.info("All resources cleaned up. Exiting gracefully.")
 
 
 
