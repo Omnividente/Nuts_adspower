@@ -24,6 +24,7 @@ TIMER_FILE = "timers.json"
 
 
 class UpdateManager:
+    TEMP_UPDATE_FLAG = "update_in_progress"
     def __init__(self, settings):
         """
         :param settings: Словарь настроек, загружаемый из settings.txt.
@@ -141,41 +142,38 @@ class UpdateManager:
     def update_file(self, file_name):
         """Обновляет файл, если он изменился."""
         if not self.repo_url:
-            logger.warning(f"REPO_URL is not configured in settings for {file_name}.")
-            return "REPO_URL Missing"
+            logger.warning("REPO_URL is not configured in settings.")
+            return False
 
+        remote_url = self.convert_to_raw_url(self.repo_url, file_name)
+        local_path = os.path.join(self.local_dir, file_name.strip())
+
+        logger.info(f"Checking for updates to {file_name}...")
+
+        # Получаем хэши
+        remote_hash = self.get_remote_file_hash(remote_url)
+        local_hash = self.get_local_file_hash(local_path)
+
+        if not remote_hash:
+            logger.error(f"Unable to fetch remote hash for {file_name}. Skipping update.")
+            return False
+
+        if remote_hash == local_hash:
+            logger.info(f"No updates found for {file_name}.")
+            return False
+
+        # Если файл действительно отличается, обновляем его
         try:
-            # Передаём оба аргумента: repo_url и file_name
-            remote_url = self.convert_to_raw_url(self.repo_url, file_name)
-            local_path = os.path.join(self.local_dir, file_name.strip())
-
-            logger.info(f"Checking for updates to {file_name} from {remote_url}...")
-
-            # Проверяем удалённый и локальный хэши
-            remote_hash = self.get_remote_file_hash(remote_url)
-            local_hash = self.get_local_file_hash(local_path)
-
-            logger.debug(f"Remote hash: {remote_hash}, Local hash: {local_hash}")
-
-            if remote_hash and remote_hash != local_hash:
-                logger.info(f"Updating file {file_name}...")
-                response = requests.get(remote_url)
-                response.raise_for_status()
-
-                with open(local_path, "wb") as f:
-                    f.write(response.content)
-                logger.info(f"File {file_name} updated successfully.")
-                return "Updated"
-            else:
-                logger.info(f"No updates found for {file_name}.")
-                return "No Changes"
-
+            logger.info(f"Updating file {file_name}...")
+            response = requests.get(remote_url)
+            response.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(response.content)
+            logger.info(f"File {file_name} updated successfully.")
+            return True
         except requests.RequestException as e:
-            logger.error(f"Error downloading {file_name} from {remote_url}: {e}")
-            return "Download Error"
-        except Exception as e:
-            logger.error(f"Unexpected error for {file_name}: {e}")
-            return "Unexpected Error"
+            logger.error(f"Error updating file {file_name}: {e}")
+            return False
 
 
 
@@ -251,6 +249,8 @@ class UpdateManager:
     def restart_script(self):
         """Перезапускает текущий скрипт."""
         logger.info("Restarting script to apply updates...")
+        with open(TEMP_UPDATE_FLAG, "w") as f:
+            f.write("1")
         python = sys.executable
         os.execl(python, python, *sys.argv)
 
