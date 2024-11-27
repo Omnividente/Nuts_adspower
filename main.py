@@ -62,7 +62,7 @@ balance_dict = {}
 balance_lock = Lock()
 exit_flag = False
 active_bots = []
-
+TEMP_UPDATE_FLAG = "temp_update.flag"
 
 # Основная обработка аккаунта
 def process_account(account, balance_dict, active_timers):
@@ -284,8 +284,13 @@ def close_browser(self):
 
 if __name__ == "__main__":
     try:
-        # Проверяем обновления перед запуском основного цикла
-        update_manager.check_and_update_all()
+        # Проверка на временный флаг
+        if os.path.exists(TEMP_UPDATE_FLAG):
+            logger.info("Skipping update check due to recent restart...")
+            os.remove(TEMP_UPDATE_FLAG)
+        else:
+            update_manager.check_and_update_all()
+
         update_manager.schedule_update_check()
 
         reset_balances()

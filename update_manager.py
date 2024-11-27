@@ -23,8 +23,7 @@ if not logger.hasHandlers():
 TIMER_FILE = "timers.json"
 TEMP_UPDATE_FLAG = "temp_update_flag"
 
-class UpdateManager:
-    TEMP_UPDATE_FLAG = "update_in_progress"
+class UpdateManager:    
     def __init__(self, settings):
         """
         :param settings: Словарь настроек, загружаемый из settings.txt.
