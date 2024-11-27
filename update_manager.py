@@ -246,6 +246,7 @@ class UpdateManager:
 
 
     def restart_script(self):
+        global TEMP_UPDATE_FLAG
         """Перезапускает текущий скрипт."""
         logger.info("Restarting script to apply updates...")
         with open(TEMP_UPDATE_FLAG, "w") as f:
