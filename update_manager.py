@@ -7,6 +7,8 @@ import logging
 import json
 from threading import Timer
 from datetime import datetime, timedelta
+from prettytable import PrettyTable
+from colorama import Fore, Style
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -183,18 +185,45 @@ class UpdateManager:
     def check_and_update_all(self):
         """Проверяет и обновляет файлы через Git или прямое скачивание."""
         logger.info("Checking for updates...")
+        update_results = []
 
-        if self.git_available:  # Проверяем наличие Git
-            if self.update_with_git():
-                self.restart_script()
-                return
+        # Проверка обновлений через Git
+        git_updated = False
+        if self.git_available:
+            logger.info("Checking updates via Git...")
+            git_updated = self.update_with_git()
+            update_results.append(["Git", "Repository", "Updated" if git_updated else "No Changes"])
 
-        # Если Git недоступен или обновлений через Git нет, используем файлы
-        if self.update_with_files():
+        # Проверка обновлений через файлы
+        if not git_updated:  # Если Git не обновлял
+            logger.info("Checking for updates via direct file download...")
+            for file_name in self.file_list:
+                try:
+                    updated = self.update_file(file_name)
+                    status = "Updated" if updated else "No Changes"
+                    update_results.append(["Direct", file_name, status])
+                except Exception as e:
+                    logger.error(f"Error checking/updating {file_name}: {e}")
+                    update_results.append(["Direct", file_name, "Error"])
+
+        # Выводим таблицу результатов
+        table = PrettyTable()
+        table.field_names = ["Method", "Target", "Status"]
+
+        for method, target, status in update_results:
+            if status == "Updated":
+                color = Fore.GREEN
+            elif status == "No Changes":
+                color = Fore.YELLOW
+            else:  # Error
+                color = Fore.RED
+            table.add_row([method, target, f"{color}{status}{Style.RESET_ALL}"])
+
+        logger.info("\nUpdate Results:\n" + str(table))
+
+        # Перезапуск, если есть обновления
+        if any(row[2] == "Updated" for row in update_results):
             self.restart_script()
-            return
-
-        logger.info("No updates found.")
 
 
     def restart_script(self):
