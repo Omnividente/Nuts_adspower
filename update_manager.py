@@ -21,9 +21,10 @@ if not logger.hasHandlers():
     logger.addHandler(handler)
 
 TIMER_FILE = "timers.json"
-TEMP_UPDATE_FLAG = "temp_update_flag"
 
-class UpdateManager:    
+
+class UpdateManager:
+    
     def __init__(self, settings):
         """
         :param settings: Словарь настроек, загружаемый из settings.txt.
@@ -57,26 +58,27 @@ class UpdateManager:
             return False
 
         try:
-            # Сбрасываем локальные изменения
-            logger.info("Resetting local changes...")
-            subprocess.check_output(["git", "reset", "--hard"], stderr=subprocess.STDOUT, text=True)
-            subprocess.check_output(["git", "clean", "-f"], stderr=subprocess.STDOUT, text=True)
-
-            # Выполняем pull для получения изменений
-            logger.info("Pulling updates from Git...")
+            # Пробуем выполнить git pull
             result = subprocess.check_output(["git", "pull"], stderr=subprocess.STDOUT, text=True)
             logger.info(f"Git output:\n{result}")
+            
+            if "Aborting" in result:
+                logger.warning("Git aborted the update due to conflicts. Attempting to reset and pull again...")
+                # Принудительный сброс локальных изменений
+                subprocess.check_output(["git", "reset", "--hard"], stderr=subprocess.STDOUT, text=True)
+                subprocess.check_output(["git", "pull"], stderr=subprocess.STDOUT, text=True)
+                logger.info("Git update completed successfully after reset.")
+                return True
 
             if "Already up to date." not in result:
                 logger.info("Script updated successfully via Git.")
                 return True  # Обновление выполнено
             else:
                 logger.info("No updates found via Git.")
-                return False  # Обновлений нет
+                return False  # Обновления нет
         except subprocess.CalledProcessError as e:
             logger.error(f"Error updating with Git:\n{e.output}")
             return False  # Ошибка при обновлении
-
 
     def get_remote_file_hash(self, file_url):
         """Получает хэш удалённого файла (MD5)."""
@@ -247,22 +249,8 @@ class UpdateManager:
     def restart_script(self):
         """Перезапускает текущий скрипт."""
         logger.info("Restarting script to apply updates...")
-        try:
-            # Создаём временный флаг
-            with open(TEMP_UPDATE_FLAG, "w") as f:
-                f.write("skip_update_check")
-            python = sys.executable
-            os.execl(python, python, *sys.argv)
-        except Exception as e:
-            logger.error(f"Error during restart: {e}")
-
-    
-    def check_update_flag():
-        """Проверяет наличие временного файла-флага."""
-        if os.path.exists(TEMP_UPDATE_FLAG):
-            os.remove(TEMP_UPDATE_FLAG)  # Удаляем флаг
-            return True
-        return False
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
 
     def save_timers_to_file(self, balance_dict):
         """Сохраняет активные таймеры в файл."""
