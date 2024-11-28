@@ -347,8 +347,7 @@ class TelegramBotAutomation:
             ("//button[contains(text(), 'Click now')]", "'Click now' button clicked", "'Click now' button is unnecessary."),
             ("/html/body/div[2]/div[2]/button", "Claimed welcome bonus: 1337 NUTS", "Welcome bonus already claimed."),
             ("/html/body/div[2]/div[2]/div[2]/button", "Daily reward claimed", "Daily reward already claimed.")
-        ]        
-        time.sleep(5)
+        ]
         for xpath, success_msg, fail_msg in actions:
             retries = 0
             while retries < self.MAX_RETRIES:
