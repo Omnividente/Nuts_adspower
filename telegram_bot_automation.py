@@ -50,7 +50,7 @@ class TelegramBotAutomation:
         self.username = None  # Initialize username as None
         self.balance = 0.0  # Initialize balance as 0.0
         self.browser_manager = BrowserManager(serial_number)
-        self.settings = settings
+        self.settings = settings        
         self.driver = None
 
         logger.info(f"Initializing automation for account {serial_number}")
@@ -244,14 +244,15 @@ class TelegramBotAutomation:
         except WebDriverException as e:
             logger.warning(f"Account {self.serial_number}: Exception while closing extra windows: {str(e)}")
     
-    def send_message(self, message):
+    def send_message(self):
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
                 chat_input_area = self.wait_for_element(By.XPATH, '/html/body/div[1]/div[1]/div[1]/div[1]/div[1]/div[1]/div[2]/input[1]')
                 if chat_input_area:
                     chat_input_area.click()
-                    chat_input_area.send_keys(message)
+                    group_url = self.settings.get('TELEGRAM_GROUP_URL', 'https://t.me/CryptoProjects_sbt')
+                    chat_input_area.send_keys(group_url)
                 
                 search_area = self.wait_for_element(By.XPATH, '/html/body/div[1]/div[1]/div[1]/div[1]/div[1]/div[3]/div[2]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/ul[1]/a[1]/div[1]')
                 if search_area:
@@ -271,26 +272,46 @@ class TelegramBotAutomation:
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
-                link = self.wait_for_element(By.CSS_SELECTOR, f"a[href*='{self.settings.get('NUTSFARM_LINK', 'https://t.me/nutsfarm_bot/nutscoin?startapp=ref_YCNYYSFWGOQTBFS')}']")
+                # Получаем ссылку из настроек
+                bot_link = self.settings.get('BOT_LINK', 'https://t.me/nutsfarm_bot/nutscoin?startapp=ref_YCNYYSFWGOQTBFS')
+
+                # Поиск элемента ссылки
+                link = self.wait_for_element(By.CSS_SELECTOR, f"a[href*='{bot_link}']")
                 if link:
+                    # Скроллинг к ссылке
+                    self.driver.execute_script("arguments[0].scrollIntoView({ behavior: 'smooth', block: 'center' });", link)
+                    time.sleep(1)  # Небольшая задержка для завершения скроллинга
+                    
+                    # Клик по ссылке
                     link.click()
                     time.sleep(2)
-                
+
+                # Поиск и клик по кнопке запуска
                 launch_button = self.wait_for_element(By.CSS_SELECTOR, "button.popup-button.btn.primary.rp", timeout=5)
                 if launch_button:
                     launch_button.click()
                     logger.info(f"Account {self.serial_number}: Launch button clicked.")
+                
+                # Лог успешного запуска
                 logger.info(f"Account {self.serial_number}: NUTSFARM STARTED")
+
+                # Случайная задержка перед переключением на iframe
                 sleep_time = random.randint(15, 20)
                 logger.info(f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                 time.sleep(sleep_time)
+
+                # Переключение на iframe
                 self.switch_to_iframe()
                 return True
+            
             except (NoSuchElementException, WebDriverException, TimeoutException) as e:
                 logger.warning(f"Account {self.serial_number}: Failed to click link or interact with elements (attempt {retries + 1}): {str(e)}")
                 retries += 1
                 time.sleep(5)
+
+        # Возвращаем False, если все попытки завершились неудачно
         return False
+
 
     def wait_for_element(self, by, value, timeout=10):
         try:

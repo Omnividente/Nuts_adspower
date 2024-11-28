@@ -121,7 +121,7 @@ def navigate_and_perform_actions(bot):
     """Навигация и выполнение всех задач с ботом."""
     if not bot.navigate_to_bot():
         raise Exception("Failed to navigate to bot")
-    if not bot.send_message(settings['TELEGRAM_GROUP_URL']):
+    if not bot.send_message():
         raise Exception("Failed to send message")
     if not bot.click_link():
         raise Exception("Failed to click link")
