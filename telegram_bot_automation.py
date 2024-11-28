@@ -217,6 +217,7 @@ class TelegramBotAutomation:
 
     def navigate_to_bot(self):
         self.clear_browser_cache_and_reload()
+        time.sleep(5)
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
