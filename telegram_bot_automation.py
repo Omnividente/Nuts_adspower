@@ -324,6 +324,21 @@ class TelegramBotAutomation:
         except Exception as e:
             logger.error(f"Account {self.serial_number}: Unexpected error while waiting for element: {str(e)}")
             return None
+    def clear_browser_cache_and_reload(self):
+        """
+        Очищает кэш браузера и перезагружает текущую страницу.
+        """
+        try:
+            # Очистка кэша
+            self.driver.execute_cdp_cmd("Network.clearBrowserCache", {})
+            logger.debug("Browser cache cleared.")
+            
+            # Перезагрузка текущей страницы
+            self.driver.refresh()
+            logger.debug("Page refreshed after clearing cache.")
+        except Exception as e:
+            logger.error(f"Failed to clear browser cache or reload page: {e}")
+
 
     def preparing_account(self):
         actions = [
@@ -332,7 +347,8 @@ class TelegramBotAutomation:
             ("/html/body/div[2]/div[2]/button", "Claimed welcome bonus: 1337 NUTS", "Welcome bonus already claimed."),
             ("/html/body/div[2]/div[2]/div[2]/button", "Daily reward claimed", "Daily reward already claimed.")
         ]
-
+        self.clear_browser_cache_and_reload()
+        time.sleep(5)
         for xpath, success_msg, fail_msg in actions:
             retries = 0
             while retries < self.MAX_RETRIES:
@@ -353,33 +369,31 @@ class TelegramBotAutomation:
                     time.sleep(5)
 
     def switch_to_iframe(self):
+        """
+        This method switches to the first iframe on the page, if available.
+        """
         try:
-            # Переключаемся в основной контент перед поиском iframe
+            # Возвращаемся к основному контенту страницы
             self.driver.switch_to.default_content()
-
-            # Ищем все iframe на странице
+            
+            # Ищем все iframes на странице
             iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
             if iframes:
                 # Переключаемся на первый iframe
                 self.driver.switch_to.frame(iframes[0])
-                logger.debug(f"Account {self.serial_number}: Switched to iframe.")
-
-                # Обновляем содержимое браузера (включая iframe)
-                self.driver.refresh()
-
-                # После refresh нужно снова переключиться на iframe
-                self.driver.switch_to.default_content()  # Сначала вернуться в основной контекст
-                self.driver.switch_to.frame(iframes[0])  # Снова переключиться на iframe
-                logger.debug(f"Account {self.serial_number}: Re-switched to iframe after refresh.")
-
+                #logger.info(f"Account {self.serial_number}: Switched to iframe.")
                 return True
             else:
-                logger.warning(f"Account {self.serial_number}: No iframe found.")
+                logger.warning(f"Account {self.serial_number}: No iframe found to switch.")
+                return False
         except NoSuchElementException:
             logger.warning(f"Account {self.serial_number}: No iframe found.")
+            return False
         except Exception as e:
             logger.error(f"Account {self.serial_number}: Unexpected error while switching to iframe: {str(e)}")
-        return False
+            return False
+
+
 
 
     def get_username(self):
