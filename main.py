@@ -96,7 +96,7 @@ def process_account(account, balance_dict, active_timers):
                 retry_delay = random.randint(1800, 4200)  # 30–70 минут
                 next_retry_time = datetime.now() + timedelta(seconds=retry_delay)
                 update_balance_info(account, "N/A", 0.0, next_retry_time, "ERROR", balance_dict)
-                schedule_retry(account, next_retry_time, balance_dict, active_timers)
+                schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_delay)
         finally:
             try:
                 if bot:
@@ -177,10 +177,10 @@ def schedule_next_run(account, next_schedule, balance_dict, active_timers):
 
 
 # Планирование повторной попытки
-def schedule_retry(account, balance_dict, active_timers):
+def schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_delay):
     """Планирование повторной попытки выполнения."""
-    retry_delay = random.randint(1800, 4200)  # 30–70 минут
-    next_retry_time = datetime.now() + timedelta(seconds=retry_delay)
+    #retry_delay = random.randint(1800, 4200)  # 30–70 минут
+    #next_retry_time = datetime.now() + timedelta(seconds=retry_delay)
     
     # Обновляем информацию о следующем запуске
     update_balance_info(account, "N/A", 0.0, next_retry_time, "ERROR", balance_dict)
@@ -196,10 +196,6 @@ def schedule_retry(account, balance_dict, active_timers):
     
     logger.info(f"Account {account}: Retry scheduled at {next_retry_time}")
 
-
-
-# Генерация и вывод таблицы балансов
-from colorama import Fore, Style
 
 def generate_and_display_balance_table(balance_dict, show_total=True):
     """Генерация таблицы балансов и её вывод."""
