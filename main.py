@@ -7,7 +7,7 @@ from colorama import Fore, Style
 from prettytable import PrettyTable
 from datetime import datetime, timedelta
 from threading import Timer, Lock
-
+###################################################################################################################
 # Загрузка настроек
 def load_settings():
     settings = {}
@@ -61,7 +61,7 @@ exit_flag = False
 # Основная обработка аккаунта
 def process_account(account, balance_dict, active_timers):
     global exit_flag
-
+    bot = None  # Убедимся, что объект доступен для finally
     logger.info(f"Processing account: {account}")
     retry_count = 0
     success = False
@@ -88,6 +88,10 @@ def process_account(account, balance_dict, active_timers):
             # Установка таймера для следующего запуска
             if next_schedule:
                 schedule_next_run(account, next_schedule, balance_dict, active_timers)
+        except KeyboardInterrupt:
+            logger.info("KeyboardInterrupt detected in process_account. Exiting...")
+            exit_flag = True  # Устанавливаем флаг выхода
+            raise  # Прерывание поднимается выше для обработки в __main__
         except Exception as e:
             retry_count += 1
             logger.warning(f"Account {account}: Error on attempt {retry_count}: {e}")
@@ -98,12 +102,13 @@ def process_account(account, balance_dict, active_timers):
                 update_balance_info(account, "N/A", 0.0, next_retry_time, "ERROR", balance_dict)
                 schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_delay)
         finally:
-            try:
-                if bot:
-                    bot.browser_manager.close_browser()  # Закрываем браузер
-            except Exception as e:
-                logger.warning(f"Failed to close browser for account {account}: {e}")
-            time.sleep(random.randint(5, 15))  # Пауза между попытками
+             # Закрытие браузера
+            if bot:
+                try:
+                    bot.browser_manager.close_browser()
+                except Exception as e:
+                    logger.warning(f"Failed to close browser for account {account}: {e}")
+            #time.sleep(random.randint(5, 15))  # Пауза между попытками
 
     if not success:
         logger.error(f"Account {account}: Failed after 3 retries.")
@@ -259,37 +264,47 @@ if __name__ == "__main__":
 
         # Обработка каждого аккаунта
         for account in accounts:
-            if exit_flag:
+            if exit_flag:  # Проверка флага выхода
+                logger.info("Exit flag detected. Stopping account processing.")
                 break
 
             try:
-                # Передаём обработку аккаунта в process_account
-                process_account(account, balance_dict, active_timers)
+                process_account(account, balance_dict, active_timers)  # Обработка аккаунта
+            except KeyboardInterrupt:
+                logger.info("KeyboardInterrupt detected during account processing.")
+                exit_flag = True
+                break  # Прерываем цикл обработки аккаунтов
             except Exception as e:
                 logger.warning(f"Error while processing account {account}: {e}")
 
-        # Генерация таблицы после завершения обработки всех аккаунтов
-        logger.info("Generating final balance table...")
-        generate_and_display_balance_table(balance_dict, show_total=True)
+            # Проверка флага выхода после обработки аккаунта
+            if exit_flag:
+                logger.info("Exit flag detected. Stopping account processing.")
+                break
 
         logger.info("All accounts processed. Waiting for timers to complete...")
-        while not exit_flag and any(t.is_alive() for t in active_timers):
+        while not exit_flag and any(timer.is_alive() for timer in active_timers):
+            time.sleep(1)
+        
+        # Ожидание завершения всех таймеров
+        while not exit_flag and any(timer.is_alive() for timer in active_timers):
             time.sleep(1)
 
         logger.info("Restarting the cycle in 5 minutes...")
-        time.sleep(300)  # 5 минут
+        if not exit_flag:
+            time.sleep(300)  # Задержка перед повторным запуском
 
     except KeyboardInterrupt:
-        logger.info("Exiting on user interrupt...")
-        exit_flag = True
-
-        # Остановка всех таймеров
-        logger.info("Cancelling all timers...")
+        logger.info("KeyboardInterrupt detected in main loop. Exiting...")
+        exit_flag = True  # Установка флага выхода
+    finally:
+        # Остановка всех активных таймеров
+        logger.info("Cleaning up active timers...")
         for timer in active_timers:
             if timer.is_alive():
                 timer.cancel()
-
         logger.info("All resources cleaned up. Exiting gracefully.")
+
 
 
 
