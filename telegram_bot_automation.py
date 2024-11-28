@@ -354,17 +354,33 @@ class TelegramBotAutomation:
 
     def switch_to_iframe(self):
         try:
+            # Переключаемся в основной контент перед поиском iframe
             self.driver.switch_to.default_content()
+
+            # Ищем все iframe на странице
             iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
             if iframes:
+                # Переключаемся на первый iframe
                 self.driver.switch_to.frame(iframes[0])
                 logger.debug(f"Account {self.serial_number}: Switched to iframe.")
+
+                # Обновляем содержимое браузера (включая iframe)
+                self.driver.refresh()
+
+                # После refresh нужно снова переключиться на iframe
+                self.driver.switch_to.default_content()  # Сначала вернуться в основной контекст
+                self.driver.switch_to.frame(iframes[0])  # Снова переключиться на iframe
+                logger.debug(f"Account {self.serial_number}: Re-switched to iframe after refresh.")
+
                 return True
+            else:
+                logger.warning(f"Account {self.serial_number}: No iframe found.")
         except NoSuchElementException:
             logger.warning(f"Account {self.serial_number}: No iframe found.")
         except Exception as e:
             logger.error(f"Account {self.serial_number}: Unexpected error while switching to iframe: {str(e)}")
         return False
+
 
     def get_username(self):
         # Получение имени пользователя
