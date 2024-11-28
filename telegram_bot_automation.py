@@ -216,6 +216,7 @@ class TelegramBotAutomation:
 
 
     def navigate_to_bot(self):
+        self.clear_browser_cache_and_reload()
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
@@ -346,8 +347,7 @@ class TelegramBotAutomation:
             ("//button[contains(text(), 'Click now')]", "'Click now' button clicked", "'Click now' button is unnecessary."),
             ("/html/body/div[2]/div[2]/button", "Claimed welcome bonus: 1337 NUTS", "Welcome bonus already claimed."),
             ("/html/body/div[2]/div[2]/div[2]/button", "Daily reward claimed", "Daily reward already claimed.")
-        ]
-        self.clear_browser_cache_and_reload()
+        ]        
         time.sleep(5)
         for xpath, success_msg, fail_msg in actions:
             retries = 0
