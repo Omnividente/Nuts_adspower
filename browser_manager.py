@@ -56,7 +56,7 @@ class BrowserManager:
             response.raise_for_status()
             data = response.json()
             if data['code'] == 0 and data['data']['status'] == 'Active':
-                logger.info(f"Account {self.serial_number}: Browser is already active.")
+                #logger.info(f"Account {self.serial_number}: Browser is already active.")
                 return True
             else:
                 return False
