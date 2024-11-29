@@ -7,6 +7,9 @@ from colorama import Fore, Style
 from prettytable import PrettyTable
 from datetime import datetime, timedelta
 from threading import Timer, Lock
+import json
+import os
+###################################################################################################################
 ###################################################################################################################
 # Загрузка настроек
 def load_settings():
@@ -56,8 +59,27 @@ if not logger.hasHandlers():
 balance_dict = {}
 balance_lock = Lock()
 exit_flag = False
+TIMERS_FILE = "timers.json"
+account_lock = Lock()
 
+def load_timers():
+    """Загрузка таймеров из JSON-файла."""
+    if not os.path.exists(TIMERS_FILE):
+        return {}
+    try:
+        with open(TIMERS_FILE, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading timers from file: {e}")
+        return {}
 
+def save_timers(timers):
+    """Сохранение таймеров в JSON-файл."""
+    try:
+        with open(TIMERS_FILE, "w") as f:
+            json.dump(timers, f, indent=4)
+    except Exception as e:
+        logger.error(f"Error saving timers to file: {e}")
 # Основная обработка аккаунта
 def process_account(account, balance_dict, active_timers):
     global exit_flag
@@ -65,56 +87,56 @@ def process_account(account, balance_dict, active_timers):
     logger.info(f"Processing account: {account}")
     retry_count = 0
     success = False
+    with account_lock:  # Гарантируем, что одновременно обрабатывается только один аккаунт
+        while retry_count < 3 and not success and not exit_flag:
+            try:
+                # Инициализация объекта TelegramBotAutomation для каждой попытки
+                bot = TelegramBotAutomation(account, settings)
 
-    while retry_count < 3 and not success and not exit_flag:
-        try:
-            # Инициализация объекта TelegramBotAutomation для каждой попытки
-            bot = TelegramBotAutomation(account, settings)
+                # Навигация и выполнение задач
+                navigate_and_perform_actions(bot)
 
-            # Навигация и выполнение задач
-            navigate_and_perform_actions(bot)
+                # Получение данных аккаунта
+                username = bot.get_username() or "N/A"
+                balance = parse_balance(bot.get_balance())
+                next_schedule = calculate_next_schedule(bot.get_time())
 
-            # Получение данных аккаунта
-            username = bot.get_username() or "N/A"
-            balance = parse_balance(bot.get_balance())
-            next_schedule = calculate_next_schedule(bot.get_time())
+                # Обновление баланса
+                update_balance_info(account, username, balance, next_schedule, "Success", balance_dict)
+                success = True
 
-            # Обновление баланса
-            update_balance_info(account, username, balance, next_schedule, "Success", balance_dict)
-            success = True
+                logger.info(f"Account {account}: Next schedule: {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}")
 
-            logger.info(f"Account {account}: Next schedule: {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}")
-
-            # Установка таймера для следующего запуска
-            if next_schedule:
-                schedule_next_run(account, next_schedule, balance_dict, active_timers)
-        except KeyboardInterrupt:
-            logger.info("KeyboardInterrupt detected in process_account. Exiting...")
-            exit_flag = True  # Устанавливаем флаг выхода
-            raise  # Прерывание поднимается выше для обработки в __main__
-        except Exception as e:
-            retry_count += 1
-            logger.warning(f"Account {account}: Error on attempt {retry_count}: {e}")
-            if retry_count >= 3:
-                # Обновляем баланс с данными об ошибке
-                retry_delay = random.randint(1800, 4200)  # 30–70 минут
-                next_retry_time = datetime.now() + timedelta(seconds=retry_delay)
-                update_balance_info(account, "N/A", 0.0, next_retry_time, "ERROR", balance_dict)
-                schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_delay)
-        finally:
-             # Закрытие браузера
-            if bot:
-                try:
-                    bot.browser_manager.close_browser()
-                except Exception as e:
-                    logger.warning(f"Failed to close browser for account {account}: {e}")
-            #time.sleep(random.randint(5, 15))  # Пауза между попытками
+                # Установка таймера для следующего запуска
+                if next_schedule:
+                    schedule_next_run(account, next_schedule, balance_dict, active_timers)
+            except KeyboardInterrupt:
+                logger.info("KeyboardInterrupt detected in process_account. Exiting...")
+                exit_flag = True  # Устанавливаем флаг выхода
+                raise  # Прерывание поднимается выше для обработки в __main__
+            except Exception as e:
+                retry_count += 1
+                logger.warning(f"Account {account}: Error on attempt {retry_count}: {e}")
+                if retry_count >= 3:
+                    # Обновляем баланс с данными об ошибке
+                    retry_delay = random.randint(1800, 4200)  # 30–70 минут
+                    next_retry_time = datetime.now() + timedelta(seconds=retry_delay)
+                    update_balance_info(account, "N/A", 0.0, next_retry_time, "ERROR", balance_dict)
+                    schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_delay)
+            finally:
+                # Закрытие браузера
+                if bot:
+                    try:
+                        bot.browser_manager.close_browser()
+                    except Exception as e:
+                        logger.warning(f"Failed to close browser for account {account}: {e}")
+                #time.sleep(random.randint(5, 15))  # Пауза между попытками
 
     if not success:
         logger.error(f"Account {account}: Failed after 3 retries.")
 
     # Вызов таблицы после обработки аккаунта
-    generate_and_display_balance_table(balance_dict, show_total=True)
+    generate_and_display_table(balance_dict,  table_type="balance",show_total=True)
 
 
 
@@ -155,7 +177,7 @@ def calculate_next_schedule(schedule_time):
 
 # Обновление информации о балансе
 def update_balance_info(account, username, balance, next_schedule, status, balance_dict):
-    """Обновление информации о балансе."""
+    """Обновление информации о балансе и таймерах."""
     with balance_lock:
         balance_dict[account] = {
             "username": username,
@@ -164,19 +186,47 @@ def update_balance_info(account, username, balance, next_schedule, status, balan
             "status": status
         }
 
+        # Обновляем данные таймеров в файле
+        timers_data = load_timers()
+        timers_data[account] = {
+            "username": username,
+            "next_schedule": next_schedule.strftime("%Y-%m-%d %H:%M:%S"),
+            "status": status,
+            "balance": balance
+        }
+        save_timers(timers_data)
+
 
 # Планирование следующего запуска
 def schedule_next_run(account, next_schedule, balance_dict, active_timers):
     delay = (next_schedule - datetime.now()).total_seconds()
     if delay > 0:
-        timer = Timer(
-            delay,
-            process_account,  # Передаём только account
-            args=(account, balance_dict, active_timers)
-        )
+        with balance_lock:
+            timers_data = load_timers()
+            account_data = balance_dict.get(account, {})
+            username = account_data.get("username", "N/A")
+            balance = account_data.get("balance", 0.0)
+
+            timers_data[account] = {
+                "username": username,
+                "next_schedule": next_schedule.strftime("%Y-%m-%d %H:%M:%S"),
+                "status": "Active",
+                "balance": balance
+            }
+            save_timers(timers_data)
+
+        def run_after_delay():
+            with balance_lock:
+                timers_data = load_timers()
+                timers_data.pop(account, None)
+                save_timers(timers_data)
+            process_account(account, balance_dict, active_timers)
+
+        timer = Timer(delay, run_after_delay)
         active_timers.append(timer)
         timer.start()
         logger.info(f"Account {account}: Timer set for {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}.")
+
 
 
 
@@ -202,52 +252,85 @@ def schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_
     logger.info(f"Account {account}: Retry scheduled at {next_retry_time}")
 
 
-def generate_and_display_balance_table(balance_dict, show_total=True):
-    """Генерация таблицы балансов и её вывод."""
+def generate_and_display_table(data, table_type="balance", show_total=True):
+    """
+    Универсальная функция для генерации и вывода таблиц.
+
+    :param data: Данные для отображения (balance_dict или timers_data).
+    :param table_type: Тип таблицы ("balance" или "timers").
+    :param show_total: Показывать ли общий баланс (только для таблицы балансов).
+    """
     table = PrettyTable()
-    table.field_names = ["ID", "Username", "Balance", "Next Scheduled Time", "Status"]
     total_balance = 0
 
-    with balance_lock:
-        # Сортировка аккаунтов по времени следующего запуска
-        sorted_accounts = sorted(
-            balance_dict.items(),
-            key=lambda item: datetime.strptime(item[1]["next_schedule"], "%Y-%m-%d %H:%M:%S")
-            if item[1]["next_schedule"] != "N/A" else datetime.max
-        )
-
-        for account, data in sorted_accounts:
-            # Преобразуем баланс в целое число
-            balance = int(data["balance"]) if data["balance"] == int(data["balance"]) else round(data["balance"])
-
-            # Преобразуем время в читаемый формат
-            next_schedule = (
-                datetime.strptime(data["next_schedule"], "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
-                if data["next_schedule"] != "N/A" else "N/A"
+    if table_type == "balance":
+        table.field_names = ["ID", "Username", "Balance", "Next Scheduled Time", "Status"]
+        with balance_lock:
+            sorted_data = sorted(
+                data.items(),
+                key=lambda item: datetime.strptime(item[1]["next_schedule"], "%Y-%m-%d %H:%M:%S")
+                if item[1]["next_schedule"] != "N/A" else datetime.max
             )
 
-            # Выбираем цвет для строки в зависимости от статуса
-            if data["status"] == "ERROR":
-                color = Fore.RED
-            else:
-                color = Fore.CYAN
+            for account, details in sorted_data:
+                balance = int(details["balance"]) if details["balance"] == int(details["balance"]) else round(details["balance"])
+                next_schedule = (
+                    datetime.strptime(details["next_schedule"], "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
+                    if details["next_schedule"] != "N/A" else "N/A"
+                )
+                color = Fore.RED if details["status"] == "ERROR" else Fore.CYAN
+                table.add_row([
+                    f"{color}{account}{Style.RESET_ALL}",
+                    f"{color}{details['username']}{Style.RESET_ALL}",
+                    f"{color}{balance}{Style.RESET_ALL}",
+                    f"{color}{next_schedule}{Style.RESET_ALL}",
+                    f"{color}{details['status']}{Style.RESET_ALL}"
+                ])
+                if details["status"] != "ERROR":
+                    total_balance += balance
 
-            # Добавляем строку с цветами
+        logger.info("\nCurrent Balance Table:\n" + str(table))
+        if show_total:
+            logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:d}{Style.RESET_ALL}")
+
+    elif table_type == "timers":
+        table.field_names = ["Account ID", "Username", "Next Scheduled Time", "Status"]
+        sorted_data = sorted(
+            data.items(),
+            key=lambda item: datetime.strptime(item[1]["next_schedule"], "%Y-%m-%d %H:%M:%S")
+        )
+
+        for account, details in sorted_data:
+            username = details.get("username", "N/A")
+            next_schedule = details["next_schedule"]
+            status = details["status"]
+            color = Fore.GREEN if status == "Active" else Fore.RED
             table.add_row([
                 f"{color}{account}{Style.RESET_ALL}",
-                f"{color}{data['username']}{Style.RESET_ALL}",
-                f"{color}{balance}{Style.RESET_ALL}",
+                f"{color}{username}{Style.RESET_ALL}",
                 f"{color}{next_schedule}{Style.RESET_ALL}",
-                f"{color}{data['status']}{Style.RESET_ALL}"
+                f"{color}{status}{Style.RESET_ALL}"
             ])
-            if data["status"] != "ERROR":
-                total_balance += balance
 
-    # Вывод таблицы в лог
-    logger.info("\nCurrent Balance Table:\n" + str(table))
-    if show_total:
-        logger.info(f"Total Balance: {Fore.MAGENTA}{total_balance:d}{Style.RESET_ALL}")
+        logger.info("\nActive Timers Table:\n" + str(table))
 
+def sync_timers_with_balance(balance_dict):
+    """
+    Синхронизирует данные активных таймеров с балансами.
+    Загружает данные из timers.json и добавляет их в balance_dict,
+    если соответствующие аккаунты отсутствуют или их данные устарели.
+    """
+    timers_data = load_timers()
+    with balance_lock:
+        for account, timer_info in timers_data.items():
+            # Если аккаунт отсутствует в balance_dict или его данные устарели, добавляем/обновляем его
+            if account not in balance_dict or balance_dict[account]["next_schedule"] != timer_info["next_schedule"]:
+                balance_dict[account] = {
+                    "username": timer_info.get("username", "N/A"),
+                    "balance": timer_info.get("balance", 0.0),  # Загружаем баланс из таймеров
+                    "next_schedule": timer_info["next_schedule"],
+                    "status": timer_info["status"]
+                }
 
 
 
@@ -259,6 +342,12 @@ if __name__ == "__main__":
         write_accounts_to_file(accounts)
 
         active_timers = []
+        timers_data = load_timers()
+        # Синхронизация таймеров с балансами
+        sync_timers_with_balance(balance_dict)
+        # Вывод таблицы активных таймеров
+        logger.info("Loading active timers...")
+        generate_and_display_table(timers_data, table_type="timers")
 
         logger.info("Starting account processing cycle.")
 
@@ -267,20 +356,29 @@ if __name__ == "__main__":
             if exit_flag:  # Проверка флага выхода
                 logger.info("Exit flag detected. Stopping account processing.")
                 break
+            if account in timers_data:
+                timer_info = timers_data[account]
+                next_schedule = datetime.strptime(timer_info["next_schedule"], "%Y-%m-%d %H:%M:%S")
+                if next_schedule > datetime.now():
+                    # Планируем запуск по сохраненному таймеру
+                    schedule_next_run(account, next_schedule, balance_dict, active_timers)
+                else:
+                    # Таймер истек, запускаем немедленно
+                    process_account(account, balance_dict, active_timers)
+            else:        
+                try:
+                    process_account(account, balance_dict, active_timers)  # Обработка аккаунта
+                except KeyboardInterrupt:
+                    logger.info("KeyboardInterrupt detected during account processing.")
+                    exit_flag = True
+                    break  # Прерываем цикл обработки аккаунтов
+                except Exception as e:
+                    logger.warning(f"Error while processing account {account}: {e}")
 
-            try:
-                process_account(account, balance_dict, active_timers)  # Обработка аккаунта
-            except KeyboardInterrupt:
-                logger.info("KeyboardInterrupt detected during account processing.")
-                exit_flag = True
-                break  # Прерываем цикл обработки аккаунтов
-            except Exception as e:
-                logger.warning(f"Error while processing account {account}: {e}")
-
-            # Проверка флага выхода после обработки аккаунта
-            if exit_flag:
-                logger.info("Exit flag detected. Stopping account processing.")
-                break
+                # Проверка флага выхода после обработки аккаунта
+                if exit_flag:
+                    logger.info("Exit flag detected. Stopping account processing.")
+                    break
 
         logger.info("All accounts processed. Waiting for timers to complete...")
         while not exit_flag and any(timer.is_alive() for timer in active_timers):
