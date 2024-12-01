@@ -450,7 +450,7 @@ class TelegramBotAutomation:
                 return balance_text
 
             except (NoSuchElementException, TimeoutException) as e:
-                logger.warning(f"Account {self.serial_number}: Failed to get balance or username (attempt {retries + 1}): {str(e)}")
+                logger.warning(f"Account {self.serial_number}: Failed to get balance or username (attempt {retries + 1}): {str(e).splitlines()[0]}")
                 retries += 1
                 time.sleep(5)
 
@@ -469,12 +469,14 @@ class TelegramBotAutomation:
                 logger.info(f"Account {self.serial_number}: Start farm will be available after: {formatted_time}")
                 return formatted_time
             except (NoSuchElementException, TimeoutException) as e:
-                logger.warning(f"Account {self.serial_number}: Failed to get time (attempt {retries + 1}): {str(e)}")
+                logger.warning(f"Account {self.serial_number}: Failed to get time (attempt {retries + 1}): {str(e).splitlines()[0]}")
                 logger.debug(traceback.format_exc())  # Логгируем полный стектрейс для отладки
+                # Вызов farming при каждой ошибке
+                logger.info(f"Account {self.serial_number}: Initiating farming due to get_time error.")
+                self.farming()
                 retries += 1
                 time.sleep(5)
         logger.error(f"Account {self.serial_number}: Could not retrieve time after {self.MAX_RETRIES} attempts. Initiating farming.")
-        self.farming()  # Повторный вызов farming при неудаче
         return "N/A"
 
     def farming(self):
@@ -498,7 +500,7 @@ class TelegramBotAutomation:
                     logger.info(f"Account {self.serial_number}: {fail_msg}")
                     break
                 except WebDriverException as e:
-                    logger.warning(f"Account {self.serial_number}: Failed action (attempt {retries + 1}): {str(e)}")
+                    logger.warning(f"Account {self.serial_number}: Failed action (attempt {retries + 1}): {str(e).splitlines()[0]}")
                     logger.debug(traceback.format_exc())  # Логгируем полный стектрейс для отладки
                     retries += 1
                     time.sleep(5)
