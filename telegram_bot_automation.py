@@ -8,6 +8,8 @@ from selenium.common.exceptions import NoSuchElementException, WebDriverExceptio
 from browser_manager import BrowserManager
 from utils import update_balance_table
 from colorama import Fore, Style
+import traceback
+
 
 
 
@@ -468,8 +470,11 @@ class TelegramBotAutomation:
                 return formatted_time
             except (NoSuchElementException, TimeoutException) as e:
                 logger.warning(f"Account {self.serial_number}: Failed to get time (attempt {retries + 1}): {str(e)}")
+                logger.debug(traceback.format_exc())  # Логгируем полный стектрейс для отладки
                 retries += 1
                 time.sleep(5)
+        logger.error(f"Account {self.serial_number}: Could not retrieve time after {self.MAX_RETRIES} attempts. Initiating farming.")
+        self.farming()  # Повторный вызов farming при неудаче
         return "N/A"
 
     def farming(self):
@@ -494,5 +499,6 @@ class TelegramBotAutomation:
                     break
                 except WebDriverException as e:
                     logger.warning(f"Account {self.serial_number}: Failed action (attempt {retries + 1}): {str(e)}")
+                    logger.debug(traceback.format_exc())  # Логгируем полный стектрейс для отладки
                     retries += 1
                     time.sleep(5)
