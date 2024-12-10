@@ -45,7 +45,7 @@ if not logger.hasHandlers():
     logger.addHandler(handler)
 
 class TelegramBotAutomation:
-    MAX_RETRIES = 3
+    MAX_RETRIES = 10
 
     def __init__(self, serial_number, settings):
         self.serial_number = serial_number
@@ -461,8 +461,16 @@ class TelegramBotAutomation:
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
-                parent_block = self.driver.find_element(By.XPATH, "//div[contains(@class, 'flex h-12 flex-1 items-center justify-center')]")
+                # Ищем блок с временем
+                parent_block = self.driver.find_element(By.XPATH, "//div[contains(@class, 'flex h-[50px] flex-1 items-center justify-center')]")
+                
+                # Ищем видимые элементы времени
                 visible_time_elements = parent_block.find_elements(By.XPATH, ".//span[contains(@class, 'index-module_num__j6XH3') and not(@aria-hidden='true')]")
+                
+                if not visible_time_elements:
+                    raise NoSuchElementException("No visible time elements found.")
+                
+                # Сбор текста времени
                 time_text = ''.join([element.get_attribute("textContent").strip() for element in visible_time_elements])
                 formatted_time = f"{time_text[:2]}:{time_text[2:4]}:{time_text[4:6]}"
                 
@@ -470,14 +478,17 @@ class TelegramBotAutomation:
                 return formatted_time
             except (NoSuchElementException, TimeoutException) as e:
                 logger.warning(f"Account {self.serial_number}: Failed to get time (attempt {retries + 1}): {str(e).splitlines()[0]}")
-                logger.debug(traceback.format_exc())  # Логгируем полный стектрейс для отладки
+                logger.debug(traceback.format_exc())  # Логируем полный стектрейс для отладки
+                
                 # Вызов farming при каждой ошибке
                 logger.info(f"Account {self.serial_number}: Initiating farming due to get_time error.")
                 self.farming()
                 retries += 1
                 time.sleep(5)
+        
         logger.error(f"Account {self.serial_number}: Could not retrieve time after {self.MAX_RETRIES} attempts. Initiating farming.")
         return "N/A"
+
 
     def farming(self):
         actions = [
