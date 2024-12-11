@@ -1,7 +1,5 @@
 import requests
 import time
-import logging
-import signal
 from selenium import webdriver
 from requests.exceptions import RequestException
 from selenium.webdriver.chrome.service import Service
@@ -34,23 +32,23 @@ class BrowserManager:
             else:
                 return False
         except requests.exceptions.RequestException as e:
-            logger.error(f"Account {self.serial_number}: Failed to check browser status due to network issue: {str(e)}")
+            logger.error(f"#{self.serial_number}: Failed to check browser status due to network issue: {str(e)}")
             return False
         except Exception as e:
-            logger.exception(f"Account {self.serial_number}: Unexpected exception while checking browser status: {str(e)}")
+            logger.exception(f"#{self.serial_number}: Unexpected exception while checking browser status: {str(e)}")
             return False
             
     def wait_browser_close(self):
         if self.check_browser_status():
-            logger.info(f"Account {self.serial_number}: Browser already open. Waiting for closure.")          
+            logger.info(f"#{self.serial_number}: Browser already open. Waiting for closure.")          
             start_time = time.time()
             timeout = 900
             while time.time() - start_time < timeout:
                 if not self.check_browser_status():
-                    logger.info(f"Account {self.serial_number}: Browser already closed.")
+                    logger.info(f"#{self.serial_number}: Browser already closed.")
                     return True
                 time.sleep(5)
-            logger.warning(f"Account {self.serial_number}: Waiting time for browser closure has expired.")
+            logger.warning(f"#{self.serial_number}: Waiting time for browser closure has expired.")
             return False
         return True
             
@@ -59,7 +57,7 @@ class BrowserManager:
         while retries < self.MAX_RETRIES:
             try:
                 if self.check_browser_status():
-                    logger.info(f"Account {self.serial_number}: Browser already open. Closing the existing browser.")
+                    logger.info(f"#{self.serial_number}: Browser already open. Closing the existing browser.")
                     self.close_browser()
                     time.sleep(5)
 
@@ -88,26 +86,26 @@ class BrowserManager:
                     service = Service(executable_path=webdriver_path)
                     self.driver = webdriver.Chrome(service=service, options=chrome_options)
                     self.driver.set_window_size(600, 720)
-                    logger.info(f"Account {self.serial_number}: Browser started successfully.")
+                    logger.info(f"#{self.serial_number}: Browser started successfully.")
                     return True
                 else:
-                    logger.warning(f"Account {self.serial_number}: Failed to start the browser. Error: {data['msg']}")
+                    logger.warning(f"#{self.serial_number}: Failed to start the browser. Error: {data['msg']}")
                     retries += 1
                     time.sleep(5)  # Wait before retrying
             except requests.exceptions.RequestException as e:
-                logger.error(f"Account {self.serial_number}: Network issue when starting browser: {str(e)}")
+                logger.error(f"#{self.serial_number}: Network issue when starting browser: {str(e)}")
                 retries += 1
                 time.sleep(5)
             except WebDriverException as e:
-                logger.warning(f"Account {self.serial_number}: WebDriverException occurred: {str(e)}")
+                logger.warning(f"#{self.serial_number}: WebDriverException occurred: {str(e)}")
                 retries += 1
                 time.sleep(5)
             except Exception as e:
-                logger.exception(f"Account {self.serial_number}: Unexpected exception in starting browser: {str(e)}")
+                logger.exception(f"#{self.serial_number}: Unexpected exception in starting browser: {str(e)}")
                 retries += 1
                 time.sleep(5)
         
-        logger.error(f"Account {self.serial_number}: Failed to start browser after {self.MAX_RETRIES} retries.")
+        logger.error(f"#{self.serial_number}: Failed to start browser after {self.MAX_RETRIES} retries.")
         return False
 
     
@@ -117,7 +115,7 @@ class BrowserManager:
         """
         # Флаг для предотвращения повторного закрытия
         if getattr(self, "browser_closed", False):
-            logger.info(f"Account {self.serial_number}: Browser already closed. Skipping.")
+            logger.info(f"#{self.serial_number}: Browser already closed. Skipping.")
             return False
 
         self.browser_closed = True  # Устанавливаем флаг перед попыткой закрытия
@@ -133,25 +131,25 @@ class BrowserManager:
             data = response.json()
 
             if data.get('code') == 0:
-                logger.info(f"Account {self.serial_number}: Browser stopped via API successfully.")
+                logger.info(f"#{self.serial_number}: Browser stopped via API successfully.")
                 return True
             else:
-                logger.warning(f"Account {self.serial_number}: API stop returned unexpected code: {data.get('code')}")
+                logger.warning(f"#{self.serial_number}: API stop returned unexpected code: {data.get('code')}")
         except requests.exceptions.RequestException as e:
-            logger.error(f"Account {self.serial_number}: Network issue while stopping browser via API: {str(e)}")
+            logger.error(f"#{self.serial_number}: Network issue while stopping browser via API: {str(e)}")
         except Exception as e:
-            logger.exception(f"Account {self.serial_number}: Unexpected error during API stop: {str(e)}")
+            logger.exception(f"#{self.serial_number}: Unexpected error during API stop: {str(e)}")
 
         # Если API не сработал, пробуем стандартное закрытие через WebDriver
         try:
             if self.driver:
                 self.driver.close()
                 self.driver.quit()
-                logger.info(f"Account {self.serial_number}: Browser closed successfully via WebDriver.")
+                logger.info(f"#{self.serial_number}: Browser closed successfully via WebDriver.")
         except WebDriverException as e:
-            logger.warning(f"Account {self.serial_number}: WebDriverException while closing browser: {str(e)}")
+            logger.warning(f"#{self.serial_number}: WebDriverException while closing browser: {str(e)}")
         except Exception as e:
-            logger.exception(f"Account {self.serial_number}: General exception while closing browser via WebDriver: {str(e)}")
+            logger.exception(f"#{self.serial_number}: General exception while closing browser via WebDriver: {str(e)}")
         finally:
             self.driver = None  # Обнуляем драйвер
 

@@ -2,7 +2,7 @@ import logging
 import random
 import time
 from telegram_bot_automation import TelegramBotAutomation
-from utils import read_accounts_from_file, write_accounts_to_file, reset_balances, setup_logger
+from utils import read_accounts_from_file, reset_balances, setup_logger
 from colorama import Fore, Style
 from prettytable import PrettyTable
 from datetime import datetime, timedelta
@@ -85,7 +85,7 @@ def process_account(account, balance_dict, active_timers):
                 update_balance_info(account, username, balance, next_schedule, "Success", balance_dict)
                 success = True
 
-                logger.info(f"Account {account}: Next schedule: {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.info(f"#{account}: Next schedule: {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}")
 
                 # Установка таймера для следующего запуска
                 if next_schedule:
@@ -96,7 +96,7 @@ def process_account(account, balance_dict, active_timers):
                 raise  # Прерывание поднимается выше для обработки в __main__
             except Exception as e:
                 retry_count += 1
-                logger.warning(f"Account {account}: Error on attempt {retry_count}: {e}")
+                logger.warning(f"#{account}: Error on attempt {retry_count}: {e}")
                 if retry_count >= 3:
                     # Обновляем баланс с данными об ошибке
                     retry_delay = random.randint(1800, 4200)  # 30–70 минут
@@ -113,7 +113,7 @@ def process_account(account, balance_dict, active_timers):
                 #time.sleep(random.randint(5, 15))  # Пауза между попытками
 
     if not success:
-        logger.error(f"Account {account}: Failed after 3 retries.")
+        logger.error(f"#{account}: Failed after 3 retries.")
 
     # Вызов таблицы после обработки аккаунта
     generate_and_display_table(balance_dict,  table_type="balance", show_total=True)
@@ -205,7 +205,7 @@ def schedule_next_run(account, next_schedule, balance_dict, active_timers):
         timer = Timer(delay, run_after_delay)
         active_timers.append(timer)
         timer.start()
-        logger.debug(f"Account {account}: Timer set for {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}.")
+        logger.debug(f"#{account}: Timer set for {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}.")
 
 
 
@@ -229,7 +229,7 @@ def schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_
     active_timers.append(timer)
     timer.start()
     
-    logger.info(f"Account {account}: Retry scheduled at {next_retry_time}")
+    logger.info(f"#{account}: Retry scheduled at {next_retry_time}")
 
 
 def generate_and_display_table(data, table_type="balance", show_total=True):
@@ -343,6 +343,7 @@ if __name__ == "__main__":
         generate_and_display_table(timers_data, table_type="timers")
 
         logger.info("Starting account processing cycle.")
+        interrupted = False  # Флаг для проверки прерывания
 
         # Обработка каждого аккаунта
         for account in accounts:
@@ -362,8 +363,9 @@ if __name__ == "__main__":
                 try:
                     process_account(account, balance_dict, active_timers)  # Обработка аккаунта
                 except KeyboardInterrupt:
-                    logger.debug("KeyboardInterrupt detected during account processing.")
+                    logger.info("KeyboardInterrupt detected during account processing.", extra={'color': Fore.RED})
                     exit_flag = True
+                    interrupted = True
                     break  # Прерываем цикл обработки аккаунтов
                 except Exception as e:
                     logger.warning(f"Error while processing account {account}: {e}")
@@ -373,28 +375,31 @@ if __name__ == "__main__":
                     logger.info("Exit flag detected. Stopping account processing.")
                     break
 
-        logger.info("All accounts processed. Waiting for timers to complete...")
-        while not exit_flag and any(timer.is_alive() for timer in active_timers):
-            time.sleep(1)
+        if not interrupted:
+            logger.info("All accounts processed. Waiting for timers to complete...")
+            while not exit_flag and any(timer.is_alive() for timer in active_timers):
+                time.sleep(1)
         
-        # Ожидание завершения всех таймеров
-        while not exit_flag and any(timer.is_alive() for timer in active_timers):
-            time.sleep(1)
+            # Ожидание завершения всех таймеров
+            while not exit_flag and any(timer.is_alive() for timer in active_timers):
+                time.sleep(1)
 
-        logger.info("Restarting the cycle in 5 minutes...")
-        if not exit_flag:
-            time.sleep(300)  # Задержка перед повторным запуском
+            logger.info("Restarting the cycle in 5 minutes...")
+            if not exit_flag:
+                time.sleep(300)  # Задержка перед повторным запуском
 
     except KeyboardInterrupt:
-        logger.info("KeyboardInterrupt detected in main loop. Exiting...")
+        logger.info("KeyboardInterrupt detected in main loop. Exiting...", extra={'color': Fore.RED})
         exit_flag = True  # Установка флага выхода
+        interrupted = True
     finally:
         # Остановка всех активных таймеров
-        logger.info("Cleaning up active timers...")
+        logger.info("Cleaning up active timers...", extra={'color': Fore.YELLOW})
+        
         for timer in active_timers:
             if timer.is_alive():
                 timer.cancel()
-        logger.info("All resources cleaned up. Exiting gracefully.")
+        logger.info("All resources cleaned up. Exiting gracefully.", extra={'color': Fore.MAGENTA})
 
 
 

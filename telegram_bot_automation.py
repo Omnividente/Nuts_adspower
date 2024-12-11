@@ -1,12 +1,11 @@
-import logging
 import random
 import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, WebDriverException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException, WebDriverException, TimeoutException, StaleElementReferenceException 
 from browser_manager import BrowserManager
-from utils import setup_logger
+from utils import setup_logger, suppress_stacktrace
 from colorama import Fore, Style
 import traceback
 
@@ -17,7 +16,7 @@ logger = setup_logger()
 
 
 class TelegramBotAutomation:
-    MAX_RETRIES = 10
+    MAX_RETRIES = 3
 
     def __init__(self, serial_number, settings):
         self.serial_number = serial_number
@@ -32,29 +31,29 @@ class TelegramBotAutomation:
         # Ожидание завершения предыдущей сессии браузера
         if not self.browser_manager.wait_browser_close():
             logger.error(
-                f"Account {serial_number}: Failed to close previous browser session.")
+                f"#{serial_number}: Failed to close previous browser session.")
             raise RuntimeError("Failed to close previous browser session")
 
         # Запуск браузера
         if not self.browser_manager.start_browser():
-            logger.error(f"Account {serial_number}: Failed to start browser.")
+            logger.error(f"#{serial_number}: Failed to start browser.")
             raise RuntimeError("Failed to start browser")
 
         # Сохранение экземпляра драйвера
         self.driver = self.browser_manager.driver
-
+    @suppress_stacktrace
     def perform_quests(self):
         """
         Выполняет доступные квесты в интерфейсе через Selenium.
         """
-        logger.info(f"Account {self.serial_number}: Looking for available tasks.")
+        logger.info(f"#{self.serial_number}: Looking for available tasks.")
         processed_quests = set()  # Хранение обработанных кнопок
 
         try:
             # Переключаемся в iframe с квестами
             if not self.switch_to_iframe():
                 logger.error(
-                    f"Account {self.serial_number}: Failed to switch to iframe for quests.")
+                    f"#{self.serial_number}: Failed to switch to iframe for quests.")
                 return
 
             while True:
@@ -68,14 +67,14 @@ class TelegramBotAutomation:
                     ]
 
                     if not quest_buttons:
-                        # logger.info(f"Account {self.serial_number}: No more quests available.")
+                        # logger.info(f"#{self.serial_number}: No more quests available.")
                         break
 
                     # Берём первый квест из списка
                     current_quest = quest_buttons[0]
                     reward_text = self.get_reward_text(current_quest)
                     logger.info(
-                        f"Account {self.serial_number}: Found quest with reward: {reward_text}")
+                        f"#{self.serial_number}: Found quest with reward: {reward_text}")
 
                     # Нажимаем на кнопку квеста
                     self.safe_click(current_quest)
@@ -84,21 +83,22 @@ class TelegramBotAutomation:
                     # Выполняем взаимодействие с окном квеста
                     if self.interact_with_quest_window():
                         logger.info(
-                            f"Account {self.serial_number}: Quest with reward {reward_text} completed.")
+                            f"#{self.serial_number}: Quest with reward {reward_text} completed.")
                     else:
                         logger.warning(
-                            f"Account {self.serial_number}: Failed to complete quest with reward {reward_text}. Retrying.")
+                            f"#{self.serial_number}: Failed to complete quest with reward {reward_text}. Retrying.")
                         break  # Если квест не завершён, прерываем выполнение
                 except Exception as e:
                     logger.error(
-                        f"Account {self.serial_number}: Error while performing quest: {str(e)}")
+                        f"#{self.serial_number}: Error while performing quest: {str(e)}")
                     break
         finally:
             # Возвращаемся к главному контенту
             self.driver.switch_to.default_content()
             self.switch_to_iframe()
-            logger.info(f"Account {self.serial_number}: All quests are completed.")
-
+            logger.info(f"#{self.serial_number}: All quests are completed.")
+   
+    @suppress_stacktrace
     def has_reward(self, button):
         """
         Проверяет, содержит ли кнопка квеста награду.
@@ -111,6 +111,7 @@ class TelegramBotAutomation:
         except Exception:
             return False
 
+    @suppress_stacktrace
     def get_reward_text(self, button):
         """
         Получает текст награды из кнопки квеста.
@@ -122,6 +123,7 @@ class TelegramBotAutomation:
         except Exception:
             return "Unknown"
 
+    @suppress_stacktrace
     def interact_with_quest_window(self):
         """
         Взаимодействует с окном квеста до его закрытия.
@@ -132,7 +134,7 @@ class TelegramBotAutomation:
                 EC.presence_of_element_located(
                     (By.XPATH, "//div[contains(@style, 'position: absolute; height: inherit; width: inherit;')]"))
             )
-            # logger.info(f"Account {self.serial_number}: Quest window detected. Starting interaction.")
+            # logger.info(f"#{self.serial_number}: Quest window detected. Starting interaction.")
 
             retries = 0  # Счётчик попыток
             while retries < 10:  # Ограничение на 10 попыток взаимодействия
@@ -141,7 +143,7 @@ class TelegramBotAutomation:
                     By.XPATH, "//div[contains(@style, 'position: absolute; height: inherit; width: inherit;')]")
                 if not quest_window:
                     logger.info(
-                        f"Account {self.serial_number}: Quest window closed. Interaction complete.")
+                        f"#{self.serial_number}: Quest window closed. Interaction complete.")
                     return True  # Окно квеста успешно закрыто
 
                 # Пытаемся найти элемент для клика в правой половине
@@ -149,10 +151,10 @@ class TelegramBotAutomation:
                     By.XPATH, "/html/body/div[5]/div/div[3]/div[2]", timeout=5)
                 if quest_element:
                     self.safe_click(quest_element)
-                    # logger.info(f"Account {self.serial_number}: Clicked on the right side of the quest window.")
+                    # logger.info(f"#{self.serial_number}: Clicked on the right side of the quest window.")
                 else:
                     logger.warning(
-                        f"Account {self.serial_number}: Right-side element not found. Retrying.")
+                        f"#{self.serial_number}: Right-side element not found. Retrying.")
                     retries += 1
                     time.sleep(1)
                     continue
@@ -162,7 +164,7 @@ class TelegramBotAutomation:
                 updated_quest_window = self.driver.find_elements(
                     By.XPATH, "//div[contains(@style, 'position: absolute; height: inherit; width: inherit;')]")
                 if not updated_quest_window:
-                    # logger.info(f"Account {self.serial_number}: Quest window successfully closed after click.")
+                    # logger.info(f"#{self.serial_number}: Quest window successfully closed after click.")
                     return True
 
                 retries += 1
@@ -170,17 +172,18 @@ class TelegramBotAutomation:
 
             # Если после 10 попыток окно не закрылось
             logger.warning(
-                f"Account {self.serial_number}: Quest window did not close after maximum retries.")
+                f"#{self.serial_number}: Quest window did not close after maximum retries.")
             return False
         except TimeoutException:
             logger.warning(
-                f"Account {self.serial_number}: Quest window did not appear in time.")
+                f"#{self.serial_number}: Quest window did not appear in time.")
             return False
         except Exception as e:
             logger.error(
-                f"Account {self.serial_number}: Error interacting with quest window: {str(e)}")
+                f"#{self.serial_number}: Error interacting with quest window: {str(e)}")
             return False
 
+    @suppress_stacktrace
     def safe_click(self, element):
         """
         Безопасный клик по элементу.
@@ -196,7 +199,8 @@ class TelegramBotAutomation:
                 self.driver.execute_script("arguments[0].click();", element)
             except Exception:
                 pass
-
+    
+    @suppress_stacktrace
     def navigate_to_bot(self):
         self.clear_browser_cache_and_reload()
         time.sleep(5)
@@ -205,7 +209,7 @@ class TelegramBotAutomation:
             try:
                 self.driver.get('https://web.telegram.org/k/')
                 logger.debug(
-                    f"Account {self.serial_number}: Navigated to Telegram web.")
+                    f"#{self.serial_number}: Navigated to Telegram web.")
                 self.close_extra_windows()
                 sleep_time = random.randint(5, 7)
                 logger.debug(
@@ -214,11 +218,12 @@ class TelegramBotAutomation:
                 return True
             except (WebDriverException, TimeoutException) as e:
                 logger.warning(
-                    f"Account {self.serial_number}: Exception in navigating to Telegram bot (attempt {retries + 1}): {str(e)}")
+                    f"#{self.serial_number}: Exception in navigating to Telegram bot (attempt {retries + 1}): {str(e)}")
                 retries += 1
                 time.sleep(5)
         return False
 
+    @suppress_stacktrace
     def close_extra_windows(self):
         try:
             current_window = self.driver.current_window_handle
@@ -230,8 +235,9 @@ class TelegramBotAutomation:
                     self.driver.switch_to.window(current_window)
         except WebDriverException as e:
             logger.warning(
-                f"Account {self.serial_number}: Exception while closing extra windows: {str(e)}")
+                f"#{self.serial_number}: Exception while closing extra windows: {str(e)}")
 
+    @suppress_stacktrace
     def send_message(self):
         retries = 0
         while retries < self.MAX_RETRIES:
@@ -249,7 +255,7 @@ class TelegramBotAutomation:
                 if search_area:
                     search_area.click()
                     logger.debug(
-                        f"Account {self.serial_number}: Group searched.")
+                        f"#{self.serial_number}: Group searched.")
                 sleep_time = random.randint(5, 7)
                 logger.debug(
                     f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
@@ -257,11 +263,12 @@ class TelegramBotAutomation:
                 return True
             except (NoSuchElementException, WebDriverException) as e:
                 logger.warning(
-                    f"Account {self.serial_number}: Failed to perform action (attempt {retries + 1}): {str(e)}")
+                    f"#{self.serial_number}: Failed to perform action (attempt {retries + 1}): {str(e)}")
                 retries += 1
                 time.sleep(5)
         return False
 
+    @suppress_stacktrace
     def click_link(self):
         retries = 0
         while retries < self.MAX_RETRIES:
@@ -290,10 +297,10 @@ class TelegramBotAutomation:
                 if launch_button:
                     launch_button.click()
                     logger.info(
-                        f"Account {self.serial_number}: Launch button clicked.")
+                        f"#{self.serial_number}: Launch button clicked.")
 
                 # Лог успешного запуска
-                logger.info(f"Account {self.serial_number}: NUTSFARM STARTED")
+                logger.info(f"#{self.serial_number}: NUTSFARM STARTED")
 
                 # Случайная задержка перед переключением на iframe
                 sleep_time = random.randint(15, 20)
@@ -307,26 +314,28 @@ class TelegramBotAutomation:
 
             except (NoSuchElementException, WebDriverException, TimeoutException) as e:
                 logger.warning(
-                    f"Account {self.serial_number}: Failed to click link or interact with elements (attempt {retries + 1}): {str(e)}")
+                    f"#{self.serial_number}: Failed to click link or interact with elements (attempt {retries + 1}): {str(e)}")
                 retries += 1
                 time.sleep(5)
 
         # Возвращаем False, если все попытки завершились неудачно
         return False
 
+    @suppress_stacktrace
     def wait_for_element(self, by, value, timeout=10):
         try:
             return WebDriverWait(self.driver, timeout).until(
                 EC.element_to_be_clickable((by, value))
             )
         except TimeoutException:
-            # logger.warning(f"Account {self.serial_number}: Failed to find the element located by {by} with value {value} within {timeout} seconds.")
+            # logger.warning(f"#{self.serial_number}: Failed to find the element located by {by} with value {value} within {timeout} seconds.")
             return None
         except Exception as e:
             logger.error(
-                f"Account {self.serial_number}: Unexpected error while waiting for element: {str(e)}")
+                f"#{self.serial_number}: Unexpected error while waiting for element: {str(e)}")
             return None
 
+    @suppress_stacktrace
     def clear_browser_cache_and_reload(self):
         """
         Очищает кэш браузера и перезагружает текущую страницу.
@@ -342,6 +351,7 @@ class TelegramBotAutomation:
         except Exception as e:
             logger.error(f"Failed to clear browser cache or reload page: {e}")
 
+    @suppress_stacktrace
     def preparing_account(self):
         actions = [
             ("/html/body/div[1]/div/button", "First start button claimed"),
@@ -361,7 +371,7 @@ class TelegramBotAutomation:
                     element.click()
 
                     # Лог успешного нажатия
-                    logger.info(f"Account {self.serial_number}: {success_msg}")
+                    logger.info(f"#{self.serial_number}: {success_msg}")
 
                     # Сон перед следующей попыткой
                     sleep_time = random.randint(5, 7)
@@ -371,20 +381,20 @@ class TelegramBotAutomation:
                     break  # Завершаем попытки, если успешно нажали
                 except NoSuchElementException:
                     # Элемент не найден, переход к следующему действию
-                    logger.debug(f"Account {self.serial_number}: Element not found for action: {success_msg}")
+                    logger.debug(f"#{self.serial_number}: Element not found for action: {success_msg}")
                     break
                 except WebDriverException as e:
                     # Обработка исключения WebDriverException
                     retries += 1
                     logger.warning(
-                        f"Account {self.serial_number}: Failed action (attempt {retries}): {str(e)}")
+                        f"#{self.serial_number}: Failed action (attempt {retries}): {str(e)}")
                     time.sleep(5)
                     # Если количество попыток превышено, просто переходим к следующему
                     if retries >= self.MAX_RETRIES:
-                        logger.error(f"Account {self.serial_number}: Exceeded maximum retries for action: {success_msg}")
+                        logger.error(f"#{self.serial_number}: Exceeded maximum retries for action: {success_msg}")
                         break
 
-
+    @suppress_stacktrace
     def switch_to_iframe(self):
         """
         This method switches to the first iframe on the page, if available.
@@ -398,20 +408,21 @@ class TelegramBotAutomation:
             if iframes:
                 # Переключаемся на первый iframe
                 self.driver.switch_to.frame(iframes[0])
-                # logger.info(f"Account {self.serial_number}: Switched to iframe.")
+                # logger.info(f"#{self.serial_number}: Switched to iframe.")
                 return True
             else:
                 logger.warning(
-                    f"Account {self.serial_number}: No iframe found to switch.")
+                    f"#{self.serial_number}: No iframe found to switch.")
                 return False
         except NoSuchElementException:
-            logger.warning(f"Account {self.serial_number}: No iframe found.")
+            logger.warning(f"#{self.serial_number}: No iframe found.")
             return False
         except Exception as e:
             logger.error(
-                f"Account {self.serial_number}: Unexpected error while switching to iframe: {str(e)}")
+                f"#{self.serial_number}: Unexpected error while switching to iframe: {str(e)}")
             return False
 
+    @suppress_stacktrace
     def get_username(self):
         # Получение имени пользователя
         username_block = WebDriverWait(self.driver, 10).until(
@@ -419,9 +430,10 @@ class TelegramBotAutomation:
             EC.presence_of_element_located((By.XPATH, "//header/button/p"))
         )
         username = username_block.get_attribute("textContent").strip()
-        # logger.info(f"Account {self.serial_number}: Current username: {username}")
+        # logger.info(f"#{self.serial_number}: Current username: {username}")
         return username
 
+    @suppress_stacktrace
     def get_balance(self):
         retries = 0
         while retries < self.MAX_RETRIES:
@@ -464,7 +476,7 @@ class TelegramBotAutomation:
                 # Логирование
 
                 logger.info(
-                    f"Account {self.serial_number}: Current balance: {balance_text}")
+                    f"#{self.serial_number}: Current balance: {balance_text}")
 
                 # # Обновление таблицы
                 # update_balance_table(self.serial_number,
@@ -473,64 +485,89 @@ class TelegramBotAutomation:
 
             except (NoSuchElementException, TimeoutException) as e:
                 logger.warning(
-                    f"Account {self.serial_number}: Failed to get balance or username (attempt {retries + 1}): {str(e).splitlines()[0]}")
+                    f"#{self.serial_number}: Failed to get balance or username (attempt {retries + 1}): {str(e).splitlines()[0]}")
                 retries += 1
                 time.sleep(5)
 
         # Возврат 0 в случае неудачи
         return "0"    
 
+    @suppress_stacktrace
     def get_time(self):
-        try:
-            # Ищем элемент, содержащий текст "Осталось" или "Get after"
-            all_elements = self.driver.find_elements(By.TAG_NAME, "span")
+        retries = 0
+        while retries < self.MAX_RETRIES:
+            try:
+                # Ищем элемент, содержащий текст "Осталось" или "Get after"
+                all_elements = self.driver.find_elements(By.TAG_NAME, "span")
 
-            parent_element = None
-            for element in all_elements:
-                text = element.text.strip().lower()
-                if "осталось" in text or "get after" in text:
-                    parent_element = element
-                    break
+                parent_element = None
+                for element in all_elements:
+                    try:
+                        text = element.text.strip().lower()
+                        if "осталось" in text or "get after" in text:
+                            parent_element = element
+                            break
+                    except StaleElementReferenceException:
+                        # Если элемент устарел, пропускаем его
+                        logger.debug(f"#{self.serial_number}: Stale element encountered while searching for parent element. Retrying...")
+                        continue
 
-            if not parent_element:
-                raise NoSuchElementException(
-                    "No element with text 'Осталось' or 'Get after' found.")
+                if not parent_element:
+                    raise NoSuchElementException(
+                        "No element with text 'Осталось' or 'Get after' found.")
 
-            # Логируем найденный контейнер
-            logger.debug(
-                f"Found parent element: {parent_element.get_attribute('outerHTML')}")
+                # Логируем найденный контейнер
+                logger.debug(
+                    f"Found parent element: {parent_element.get_attribute('outerHTML')}")
 
-            # Извлекаем все вложенные элементы и ищем цифры
-            child_elements = parent_element.find_elements(By.XPATH, ".//span")
+                # Извлекаем все вложенные элементы и ищем цифры
+                child_elements = parent_element.find_elements(By.XPATH, ".//span")
 
-            visible_digits = []
-            for child in child_elements:
-                text = child.get_attribute("textContent").strip()
-                aria_hidden = child.get_attribute("aria-hidden")
-                if (not aria_hidden or aria_hidden.lower() == "false") and text.isdigit() and len(text) == 1:
-                    visible_digits.append(text)
+                visible_digits = []
+                for child in child_elements:
+                    try:
+                        text = child.get_attribute("textContent").strip()
+                        aria_hidden = child.get_attribute("aria-hidden")
+                        if (not aria_hidden or aria_hidden.lower() == "false") and text.isdigit() and len(text) == 1:
+                            visible_digits.append(text)
+                    except StaleElementReferenceException:
+                        # Если элемент устарел, пропускаем его
+                        logger.debug(f"#{self.serial_number}: Stale element encountered while processing child elements. Retrying...")
+                        continue
 
-            logger.debug(f"Visible digits collected: {visible_digits}")
+                logger.debug(f"Visible digits collected: {visible_digits}")
 
-            # Проверяем, достаточно ли цифр для формирования времени
-            if len(visible_digits) >= 6:
-                time_text = ''.join(visible_digits[:6])
-                formatted_time = f"{time_text[:2]}:{time_text[2:4]}:{time_text[4:6]}"
-                logger.info(f"Start farm will be available after: {formatted_time}")
-                return formatted_time
-            else:
-                raise NoSuchElementException(
-                    "Not enough visible digits to form time.")
+                # Проверяем, достаточно ли цифр для формирования времени
+                if len(visible_digits) >= 6:
+                    time_text = ''.join(visible_digits[:6])
+                    formatted_time = f"{time_text[:2]}:{time_text[2:4]}:{time_text[4:6]}"
+                    logger.info(f"#{self.serial_number}: Start farm will be available after: {formatted_time}")
+                    return formatted_time
+                else:
+                    raise NoSuchElementException(
+                        "Not enough visible digits to form time.")
 
-        except (NoSuchElementException, TimeoutException) as e:
-            logger.warning(f"Failed to get time: {str(e)}")
-            logger.debug(traceback.format_exc())
-            return "N/A"
-        except Exception as e:
-            logger.error(f"Unexpected error during time extraction: {str(e)}")
-            logger.debug(traceback.format_exc())
-            return "N/A"
+            except (NoSuchElementException, TimeoutException) as e:
+                retries += 1
+                logger.warning(f"#{self.serial_number}: Failed to get time (attempt {retries}): {str(e)}")
+                logger.debug(traceback.format_exc())
+                logger.info(f"#{self.serial_number}: Initiating farming due to get_time error.")
+                self.farming()  # Вызываем farming при ошибке
+                time.sleep(5)
+            except StaleElementReferenceException:
+                retries += 1
+                logger.warning(f"#{self.serial_number}: Encountered stale element reference (attempt {retries}). Retrying...")
+                time.sleep(2)  # Пауза перед повторным поиском элементов
+            except Exception as e:
+                logger.error(f"#{self.serial_number}: Unexpected error during time extraction: {str(e)}")
+                logger.debug(traceback.format_exc())
+                return "N/A"
 
+        # Если превышено количество попыток, просто возвращаем "N/A"
+        logger.error(f"#{self.serial_number}: Could not retrieve time after {self.MAX_RETRIES} attempts.")
+        return "N/A"
+
+    @suppress_stacktrace
     def farming(self):
         actions = [
             ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button",
@@ -545,7 +582,7 @@ class TelegramBotAutomation:
                 try:
                     button = self.driver.find_element(By.XPATH, xpath)
                     button.click()
-                    logger.info(f"Account {self.serial_number}: {success_msg}")
+                    logger.info(f"#{self.serial_number}: {success_msg}")
                     sleep_time = random.randint(3, 4)
                     logger.debug(
                         f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
@@ -556,7 +593,7 @@ class TelegramBotAutomation:
                     break
                 except WebDriverException as e:
                     logger.warning(
-                        f"Account {self.serial_number}: Failed action (attempt {retries + 1}): {str(e).splitlines()[0]}")
+                        f"#{self.serial_number}: Failed action (attempt {retries + 1}): {str(e).splitlines()[0]}")
                     # Логгируем полный стектрейс для отладки
                     logger.debug(traceback.format_exc())
                     retries += 1
