@@ -6,45 +6,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, WebDriverException, TimeoutException
 from browser_manager import BrowserManager
-from utils import update_balance_table
+from utils import setup_logger
 from colorama import Fore, Style
 import traceback
 
 
 # Set up logging with colors
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-if not logger.hasHandlers():
-    class CustomFormatter(logging.Formatter):
-        COLORS = {
-            logging.DEBUG: Fore.CYAN,
-            logging.INFO: Fore.GREEN,
-            logging.WARNING: Fore.YELLOW,
-            logging.ERROR: Fore.RED,
-            logging.CRITICAL: Fore.MAGENTA,
-        }
-
-        def format(self, record):
-            record.asctime = self.formatTime(
-                record, self.datefmt).split('.')[0]
-            log_message = super().format(record)
-            # Set time to white
-            log_message = log_message.replace(
-                record.asctime, f"{Fore.LIGHTYELLOW_EX}{record.asctime}{Style.RESET_ALL}")
-            # Set level name color
-            levelname = f"{self.COLORS.get(record.levelno, Fore.WHITE)}{record.levelname}{Style.RESET_ALL}"
-            log_message = log_message.replace(record.levelname, levelname)
-            # Set message color based on level
-            message_color = self.COLORS.get(record.levelno, Fore.WHITE)
-            log_message = log_message.replace(
-                record.msg, f"{message_color}{record.msg}{Style.RESET_ALL}")
-            return log_message
-
-    handler = logging.StreamHandler()
-    handler.setFormatter(CustomFormatter(
-        '%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(handler)
+# Настройка логирования
+logger = setup_logger()
 
 
 class TelegramBotAutomation:
@@ -58,7 +27,7 @@ class TelegramBotAutomation:
         self.settings = settings
         self.driver = None
 
-        logger.info(f"Initializing automation for account {serial_number}")
+        logger.debug(f"Initializing automation for account {serial_number}")
 
         # Ожидание завершения предыдущей сессии браузера
         if not self.browser_manager.wait_browser_close():
@@ -78,7 +47,7 @@ class TelegramBotAutomation:
         """
         Выполняет доступные квесты в интерфейсе через Selenium.
         """
-        logger.info(f"Account {self.serial_number}: Starting quest execution.")
+        logger.info(f"Account {self.serial_number}: Looking for available tasks.")
         processed_quests = set()  # Хранение обработанных кнопок
 
         try:
@@ -128,7 +97,7 @@ class TelegramBotAutomation:
             # Возвращаемся к главному контенту
             self.driver.switch_to.default_content()
             self.switch_to_iframe()
-            logger.info(f"Account {self.serial_number}: Completed all quests.")
+            logger.info(f"Account {self.serial_number}: All quests are completed.")
 
     def has_reward(self, button):
         """
@@ -239,7 +208,7 @@ class TelegramBotAutomation:
                     f"Account {self.serial_number}: Navigated to Telegram web.")
                 self.close_extra_windows()
                 sleep_time = random.randint(5, 7)
-                logger.info(
+                logger.debug(
                     f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                 time.sleep(sleep_time)
                 return True
@@ -282,7 +251,7 @@ class TelegramBotAutomation:
                     logger.debug(
                         f"Account {self.serial_number}: Group searched.")
                 sleep_time = random.randint(5, 7)
-                logger.info(
+                logger.debug(
                     f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                 time.sleep(sleep_time)
                 return True
@@ -328,7 +297,7 @@ class TelegramBotAutomation:
 
                 # Случайная задержка перед переключением на iframe
                 sleep_time = random.randint(15, 20)
-                logger.info(
+                logger.debug(
                     f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                 time.sleep(sleep_time)
 
@@ -375,36 +344,46 @@ class TelegramBotAutomation:
 
     def preparing_account(self):
         actions = [
-            ("/html/body/div[1]/div/button", "First start button claimed",
-             "First start button already claimed."),
-            ("//button[contains(text(), 'Click now')]",
-             "'Click now' button clicked", "'Click now' button is unnecessary."),
-            ("/html/body/div[2]/div[2]/button",
-             "Claimed welcome bonus: 1337 NUTS", "Welcome bonus already claimed."),
-            ("/html/body/div[2]/div[2]/div[2]/button",
-             "Daily reward claimed", "Daily reward already claimed.")
+            ("/html/body/div[1]/div/button", "First start button claimed"),
+            ("//button[contains(text(), 'Click now')]", "'Click now' button clicked"),
+            ("/html/body/div[2]/div[2]/button", "Claimed welcome bonus: 1337 NUTS"),
+            ("/html/body/div[2]/div[2]/div[2]/button", "Daily reward claimed")
         ]
-        for xpath, success_msg, fail_msg in actions:
+
+        for xpath, success_msg in actions:
             retries = 0
             while retries < self.MAX_RETRIES:
                 try:
+                    # Поиск элемента по XPath
                     element = self.driver.find_element(By.XPATH, xpath)
+
+                    # Клик по элементу
                     element.click()
-                    logger.debug(
-                        f"Account {self.serial_number}: {success_msg}")
+
+                    # Лог успешного нажатия
+                    logger.info(f"Account {self.serial_number}: {success_msg}")
+
+                    # Сон перед следующей попыткой
                     sleep_time = random.randint(5, 7)
-                    logger.info(
+                    logger.debug(
                         f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                     time.sleep(sleep_time)
-                    break
+                    break  # Завершаем попытки, если успешно нажали
                 except NoSuchElementException:
-                    logger.info(f"Account {self.serial_number}: {fail_msg}")
+                    # Элемент не найден, переход к следующему действию
+                    logger.debug(f"Account {self.serial_number}: Element not found for action: {success_msg}")
                     break
                 except WebDriverException as e:
-                    logger.warning(
-                        f"Account {self.serial_number}: Failed action (attempt {retries + 1}): {str(e)}")
+                    # Обработка исключения WebDriverException
                     retries += 1
+                    logger.warning(
+                        f"Account {self.serial_number}: Failed action (attempt {retries}): {str(e)}")
                     time.sleep(5)
+                    # Если количество попыток превышено, просто переходим к следующему
+                    if retries >= self.MAX_RETRIES:
+                        logger.error(f"Account {self.serial_number}: Exceeded maximum retries for action: {success_msg}")
+                        break
+
 
     def switch_to_iframe(self):
         """
@@ -487,9 +466,9 @@ class TelegramBotAutomation:
                 logger.info(
                     f"Account {self.serial_number}: Current balance: {balance_text}")
 
-                # Обновление таблицы
-                update_balance_table(self.serial_number,
-                                     self.username, balance_text)
+                # # Обновление таблицы
+                # update_balance_table(self.serial_number,
+                #                      self.username, balance_text)
                 return balance_text
 
             except (NoSuchElementException, TimeoutException) as e:
@@ -499,85 +478,45 @@ class TelegramBotAutomation:
                 time.sleep(5)
 
         # Возврат 0 в случае неудачи
-        return "0"
-
-    def get_time2(self):
-        retries = 0
-        while retries < self.MAX_RETRIES:
-            try:
-                # Ищем блок с временем
-                parent_block = self.driver.find_element(
-                    By.XPATH, "//div[contains(@class, 'flex h-[50px] flex-1 items-center justify-center')]")
-
-                # Ищем видимые элементы времени
-                visible_time_elements = parent_block.find_elements(
-                    By.XPATH, ".//span[contains(@class, 'index-module_num__j6XH3') and not(@aria-hidden='true')]")
-
-                if not visible_time_elements:
-                    raise NoSuchElementException(
-                        "No visible time elements found.")
-
-                # Сбор текста времени
-                time_text = ''.join([element.get_attribute(
-                    "textContent").strip() for element in visible_time_elements])
-                formatted_time = f"{time_text[:2]}:{time_text[2:4]}:{time_text[4:6]}"
-
-                logger.info(
-                    f"Account {self.serial_number}: Start farm will be available after: {formatted_time}")
-                return formatted_time
-            except (NoSuchElementException, TimeoutException) as e:
-                logger.warning(
-                    f"Account {self.serial_number}: Failed to get time (attempt {retries + 1}): {str(e).splitlines()[0]}")
-                # Логируем полный стектрейс для отладки
-                logger.debug(traceback.format_exc())
-
-                # Вызов farming при каждой ошибке
-                logger.info(
-                    f"Account {self.serial_number}: Initiating farming due to get_time error.")
-                self.farming()
-                retries += 1
-                time.sleep(5)
-
-        logger.error(
-            f"Account {self.serial_number}: Could not retrieve time after {self.MAX_RETRIES} attempts. Initiating farming.")
-        return "N/A"
+        return "0"    
 
     def get_time(self):
         try:
-            # Ищем элементы, содержащие текст "Осталось" или "Get after"
-            containers = self.driver.find_elements(
-                By.XPATH, "//span[contains(translate(text(), 'ОГЕТАФTERосталосьGETAFTER', 'ogetafterосталосьgetafter'), 'осталось') or contains(translate(text(), 'ОГЕТАФTERосталосьGETAFTER', 'ogetafterосталосьgetafter'), 'get after')]")
+            # Ищем элемент, содержащий текст "Осталось" или "Get after"
+            all_elements = self.driver.find_elements(By.TAG_NAME, "span")
 
-            if not containers:
+            parent_element = None
+            for element in all_elements:
+                text = element.text.strip().lower()
+                if "осталось" in text or "get after" in text:
+                    parent_element = element
+                    break
+
+            if not parent_element:
                 raise NoSuchElementException(
-                    "No containers with text 'Осталось' or 'Get after' found.")
+                    "No element with text 'Осталось' or 'Get after' found.")
 
-            # Берём первый контейнер
-            container = containers[0]
+            # Логируем найденный контейнер
             logger.debug(
-                f"Found container: {container.get_attribute('outerHTML')}")
+                f"Found parent element: {parent_element.get_attribute('outerHTML')}")
 
-            # Ищем все вложенные <span> внутри контейнера
-            span_elements = container.find_elements(By.XPATH, ".//span")
+            # Извлекаем все вложенные элементы и ищем цифры
+            child_elements = parent_element.find_elements(By.XPATH, ".//span")
 
-            # Собираем только видимые цифры из элементов
             visible_digits = []
-            for element in span_elements:
-                text = element.get_attribute(
-                    "textContent").strip()  # Извлекаем textContent
-                aria_hidden = element.get_attribute(
-                    "aria-hidden")   # Проверяем атрибут aria-hidden
-                if not aria_hidden or aria_hidden.lower() == "false":
-                    if text.isdigit() and len(text) == 1:  # Проверяем, что это одиночная цифра
-                        visible_digits.append(text)
+            for child in child_elements:
+                text = child.get_attribute("textContent").strip()
+                aria_hidden = child.get_attribute("aria-hidden")
+                if (not aria_hidden or aria_hidden.lower() == "false") and text.isdigit() and len(text) == 1:
+                    visible_digits.append(text)
 
             logger.debug(f"Visible digits collected: {visible_digits}")
 
             # Проверяем, достаточно ли цифр для формирования времени
             if len(visible_digits) >= 6:
-                time_text = ''.join(visible_digits[:6])  # Берём первые 6 цифр
+                time_text = ''.join(visible_digits[:6])
                 formatted_time = f"{time_text[:2]}:{time_text[2:4]}:{time_text[4:6]}"
-                logger.info(f"Extracted time: {formatted_time}")
+                logger.info(f"Start farm will be available after: {formatted_time}")
                 return formatted_time
             else:
                 raise NoSuchElementException(
@@ -585,7 +524,6 @@ class TelegramBotAutomation:
 
         except (NoSuchElementException, TimeoutException) as e:
             logger.warning(f"Failed to get time: {str(e)}")
-            # Логируем полный стектрейс для отладки
             logger.debug(traceback.format_exc())
             return "N/A"
         except Exception as e:
@@ -596,12 +534,12 @@ class TelegramBotAutomation:
     def farming(self):
         actions = [
             ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button",
-             "'Start farming' button clicked", "'Start farming' button is not active."),
+             "'Start farming' button clicked"),
             ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button",
-             "'Collect' button clicked", "'Collect' button is not active.")
+             "'Collect' button clicked")
         ]
 
-        for xpath, success_msg, fail_msg in actions:
+        for xpath, success_msg in actions:
             retries = 0
             while retries < self.MAX_RETRIES:
                 try:
@@ -609,12 +547,12 @@ class TelegramBotAutomation:
                     button.click()
                     logger.info(f"Account {self.serial_number}: {success_msg}")
                     sleep_time = random.randint(3, 4)
-                    logger.info(
+                    logger.debug(
                         f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
                     time.sleep(sleep_time)
                     break
                 except NoSuchElementException:
-                    logger.info(f"Account {self.serial_number}: {fail_msg}")
+                    # Если элемент не найден, просто переходим к следующему действию
                     break
                 except WebDriverException as e:
                     logger.warning(
@@ -623,3 +561,4 @@ class TelegramBotAutomation:
                     logger.debug(traceback.format_exc())
                     retries += 1
                     time.sleep(5)
+

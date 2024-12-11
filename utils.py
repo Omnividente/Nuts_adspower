@@ -1,37 +1,82 @@
 from prettytable import PrettyTable
 import logging
-from colorama import Fore, Style
+from colorama import Fore, Style, init
 
-# Set up logging with colors
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# Инициализация colorama для Windows
+init(autoreset=True)
 
-if not logger.hasHandlers():
-    class CustomFormatter(logging.Formatter):
-        COLORS = {
-            logging.DEBUG: Fore.CYAN,
-            logging.INFO: Fore.GREEN,
-            logging.WARNING: Fore.YELLOW,
-            logging.ERROR: Fore.RED,
-            logging.CRITICAL: Fore.MAGENTA,
-        }
+# Глобальная переменная для логгера
+logger = None
+# Функция для настройки логирования
+# Класс для форматирования логов
+# Класс для форматирования логов
+# Класс для форматирования логов
+class CustomFormatter(logging.Formatter):
+    COLORS = {
+        logging.DEBUG: Fore.CYAN,
+        logging.INFO: Fore.GREEN,
+        logging.WARNING: Fore.YELLOW,
+        logging.ERROR: Fore.RED,
+        logging.CRITICAL: Fore.MAGENTA,
+    }
 
-        def format(self, record):
-            record.asctime = self.formatTime(record, self.datefmt).split('.')[0]
-            log_message = super().format(record)
-            # Set time to white
-            log_message = log_message.replace(record.asctime, f"{Fore.LIGHTYELLOW_EX}{record.asctime}{Style.RESET_ALL}")
-            # Set level name color
-            levelname = f"{self.COLORS.get(record.levelno, Fore.WHITE)}{record.levelname}{Style.RESET_ALL}"
-            log_message = log_message.replace(record.levelname, levelname)
-            # Set message color based on level
-            message_color = self.COLORS.get(record.levelno, Fore.WHITE)
-            log_message = log_message.replace(record.msg, f"{message_color}{record.msg}{Style.RESET_ALL}")
-            return log_message
+    def __init__(self, fmt=None, datefmt="%Y-%m-%d %H:%M:%S"):
+        """
+        Инициализация форматтера с пользовательским форматом и форматом времени.
+        """
+        super().__init__(fmt, datefmt)
+        self.datefmt = datefmt
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(CustomFormatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(handler)
+    def format(self, record):
+        """
+        Форматирование лог-сообщения с цветами и временем.
+        """
+        # Форматируем время
+        record.asctime = self.formatTime(record, self.datefmt)
+        
+        # Получаем базовое сообщение
+        log_message = super().format(record)
+
+        # Устанавливаем цвет времени
+        log_message = log_message.replace(
+            record.asctime, f"{Fore.LIGHTYELLOW_EX}{record.asctime}{Style.RESET_ALL}"
+        )
+
+        # Устанавливаем цвет уровня логирования
+        levelname = f"{self.COLORS.get(record.levelno, Fore.WHITE)}{record.levelname}{Style.RESET_ALL}"
+        log_message = log_message.replace(record.levelname, levelname)
+
+        # Устанавливаем цвет сообщения
+        message_color = self.COLORS.get(record.levelno, Fore.WHITE)
+        log_message = log_message.replace(record.msg, f"{message_color}{record.msg}{Style.RESET_ALL}")
+
+        return log_message
+
+# Функция для настройки логирования
+def setup_logger():
+    global logger
+    if logger is None:
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.INFO)  # Установите уровень логирования на DEBUG или INFO
+
+        # Настроим обработчик для вывода логов в консоль
+        handler = logging.StreamHandler()
+        handler.setFormatter(CustomFormatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logger.addHandler(handler)
+
+    return logger
+
+def is_debug_enabled():
+    """
+    Проверяет, включён ли режим DEBUG для глобального логгера.
+    """
+    global logger
+    if logger is None:
+        setup_logger()
+    return logger.isEnabledFor(logging.DEBUG)
+
+# Настроим логирование (если не было настроено ранее)
+logger = setup_logger()
 
 balances = []
 

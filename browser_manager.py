@@ -7,38 +7,11 @@ from requests.exceptions import RequestException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
+from utils import setup_logger
 from colorama import Fore, Style
 
-# Set up logging with colors
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-if not logger.hasHandlers():
-    class CustomFormatter(logging.Formatter):
-        COLORS = {
-            logging.DEBUG: Fore.CYAN,
-            logging.INFO: Fore.GREEN,
-            logging.WARNING: Fore.YELLOW,
-            logging.ERROR: Fore.RED,
-            logging.CRITICAL: Fore.MAGENTA,
-        }
-
-        def format(self, record):
-            record.asctime = self.formatTime(record, self.datefmt).split('.')[0]
-            log_message = super().format(record)
-            # Set time to white
-            log_message = log_message.replace(record.asctime, f"{Fore.LIGHTYELLOW_EX}{record.asctime}{Style.RESET_ALL}")
-            # Set level name color
-            levelname = f"{self.COLORS.get(record.levelno, Fore.WHITE)}{record.levelname}{Style.RESET_ALL}"
-            log_message = log_message.replace(record.levelname, levelname)
-            # Set message color based on level
-            message_color = self.COLORS.get(record.levelno, Fore.WHITE)
-            log_message = log_message.replace(record.msg, f"{message_color}{record.msg}{Style.RESET_ALL}")
-            return log_message
-
-    handler = logging.StreamHandler()
-    handler.setFormatter(CustomFormatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(handler)
+# Настройка логирования
+logger = setup_logger()
 
 class BrowserManager:
     MAX_RETRIES = 3
