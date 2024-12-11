@@ -267,6 +267,32 @@ class TelegramBotAutomation:
                 retries += 1
                 time.sleep(5)
         return False
+    
+    @suppress_stacktrace
+    def check_iframe_src(self):
+        """
+        Проверяет, загружен ли правильный iframe по URL в атрибуте src с ожиданием.
+        """
+        try:
+            # Ждем появления iframe в течение 15 секунд
+            iframe = WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located((By.TAG_NAME, "iframe"))
+            )
+            iframe_src = iframe.get_attribute("src")
+            
+            # Проверяем, соответствует ли src ожидаемому значению
+            if "nutsfarm.crypton.xyz" in iframe_src and "tgWebAppData" in iframe_src:
+                logger.debug(f"#{self.serial_number}: Iframe src indicates the app is loaded: {iframe_src}")
+                return True
+            else:
+                logger.warning(f"#{self.serial_number}: Unexpected iframe src: {iframe_src}")
+                return False
+        except TimeoutException:
+            logger.error(f"#{self.serial_number}: App not loaded within the timeout.")
+            return False
+        except Exception as e:
+            logger.debug(f"#{self.serial_number}: Unexpected error while checking iframe src: {str(e)}")
+            return False
 
     @suppress_stacktrace
     def click_link(self):
@@ -289,6 +315,7 @@ class TelegramBotAutomation:
 
                     # Клик по ссылке
                     link.click()
+                    logger.debug(f"#{self.serial_number}: Link clicked.")
                     time.sleep(2)
 
                 # Поиск и клик по кнопке запуска
@@ -296,30 +323,35 @@ class TelegramBotAutomation:
                     By.CSS_SELECTOR, "button.popup-button.btn.primary.rp", timeout=5)
                 if launch_button:
                     launch_button.click()
-                    logger.info(
-                        f"#{self.serial_number}: Launch button clicked.")
+                    logger.debug(f"#{self.serial_number}: Launch button clicked.")
 
-                # Лог успешного запуска
-                logger.info(f"#{self.serial_number}: NUTSFARM STARTED")
+                # Проверка iframe
+                if self.check_iframe_src():
+                    # Лог успешного запуска
+                    logger.info(f"#{self.serial_number}: App loaded successfully.")
 
-                # Случайная задержка перед переключением на iframe
-                sleep_time = random.randint(15, 20)
-                logger.debug(
-                    f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
-                time.sleep(sleep_time)
+                    # Случайная задержка перед переключением на iframe
+                    sleep_time = random.randint(3, 5)
+                    logger.debug(
+                        f"#{self.serial_number}: Sleeping for {sleep_time} seconds before switching to iframe.")
+                    time.sleep(sleep_time)
 
-                # Переключение на iframe
-                self.switch_to_iframe()
-                return True
+                    # Переключение на iframe
+                    self.switch_to_iframe()
+                    logger.debug(f"#{self.serial_number}: Switched to iframe.")
+                    return True
+                else:
+                    raise Exception(f"#{self.serial_number}: Iframe not loaded with expected content.")
 
             except (NoSuchElementException, WebDriverException, TimeoutException) as e:
                 logger.warning(
-                    f"#{self.serial_number}: Failed to click link or interact with elements (attempt {retries + 1}): {str(e)}")
+                    f"#{self.serial_number}: Failed to click link or interact with elements (attempt {retries + 1}): {str(e).splitlines()[0]}")
                 retries += 1
                 time.sleep(5)
 
         # Возвращаем False, если все попытки завершились неудачно
         return False
+
 
     @suppress_stacktrace
     def wait_for_element(self, by, value, timeout=10):

@@ -77,8 +77,14 @@ def process_account(account, balance_dict, active_timers):
                 navigate_and_perform_actions(bot)
 
                 # Получение данных аккаунта
-                username = bot.get_username() or "N/A"
+                username = bot.get_username()
+                if not username:
+                    raise Exception("Failed to retrieve username")
+
                 balance = parse_balance(bot.get_balance())
+                if balance == 0.0:
+                    raise Exception("Failed to retrieve valid balance")
+
                 next_schedule = calculate_next_schedule(bot.get_time())
 
                 # Обновление баланса
@@ -98,10 +104,9 @@ def process_account(account, balance_dict, active_timers):
                 retry_count += 1
                 logger.warning(f"#{account}: Error on attempt {retry_count}: {e}")
                 if retry_count >= 3:
-                    # Обновляем баланс с данными об ошибке
                     retry_delay = random.randint(1800, 4200)  # 30–70 минут
                     next_retry_time = datetime.now() + timedelta(seconds=retry_delay)
-                    update_balance_info(account, "N/A", 0.0, next_retry_time, "ERROR", balance_dict)
+                    update_balance_info(account, "N/A", 0.0, next_retry_time, "Error", balance_dict)
                     schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_delay)
             finally:
                 # Закрытие браузера
@@ -116,7 +121,8 @@ def process_account(account, balance_dict, active_timers):
         logger.error(f"#{account}: Failed after 3 retries.")
 
     # Вызов таблицы после обработки аккаунта
-    generate_and_display_table(balance_dict,  table_type="balance", show_total=True)
+    generate_and_display_table(balance_dict, table_type="balance", show_total=True)
+
 
 
 
@@ -131,7 +137,7 @@ def navigate_and_perform_actions(bot):
     if not bot.send_message():
         raise Exception("Failed to send message")
     if not bot.click_link():
-        raise Exception("Failed to click link")
+        raise Exception("Failed to start app")
     bot.preparing_account()
     bot.perform_quests()  # Выполнение квестов
     bot.farming()
