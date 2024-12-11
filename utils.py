@@ -1,6 +1,6 @@
-from prettytable import PrettyTable
 import logging
 from colorama import Fore, Style, init
+from functools import wraps
 
 # Инициализация colorama для Windows
 init(autoreset=True)
@@ -42,15 +42,25 @@ class CustomFormatter(logging.Formatter):
             record.asctime, f"{Fore.LIGHTYELLOW_EX}{record.asctime}{Style.RESET_ALL}"
         )
 
-        # Устанавливаем цвет уровня логирования
-        levelname = f"{self.COLORS.get(record.levelno, Fore.WHITE)}{record.levelname}{Style.RESET_ALL}"
-        log_message = log_message.replace(record.levelname, levelname)
+        # Проверяем, есть ли временный цвет для уровня логирования
+        temp_color = getattr(record, 'color', None)  # Получаем временный цвет из record
+
+        if temp_color:
+            # Если указан временный цвет, используем его
+            levelname = f"{temp_color}{record.levelname}{Style.RESET_ALL}"
+            log_message = log_message.replace(record.levelname, levelname)
+            message_color = temp_color
+        else:
+            # Стандартный цвет для уровня логирования
+            levelname = f"{self.COLORS.get(record.levelno, Fore.WHITE)}{record.levelname}{Style.RESET_ALL}"
+            log_message = log_message.replace(record.levelname, levelname)
+            message_color = self.COLORS.get(record.levelno, Fore.WHITE)
 
         # Устанавливаем цвет сообщения
-        message_color = self.COLORS.get(record.levelno, Fore.WHITE)
         log_message = log_message.replace(record.msg, f"{message_color}{record.msg}{Style.RESET_ALL}")
 
         return log_message
+
 
 # Функция для настройки логирования
 def setup_logger():
@@ -93,48 +103,19 @@ def read_accounts_from_file():
         logger.exception(f"Unexpected error while reading accounts file: {str(e)}")
         return []
 
-def write_accounts_to_file(accounts):
-    try:
-        with open('accounts.txt', 'w') as file:
-            for account in accounts:
-                file.write(f"{account}\n")
-        logger.debug("Accounts written to file successfully.")
-    except IOError as e:
-        logger.error(f"Failed to write accounts to file: {str(e)}")
-    except Exception as e:
-        logger.exception(f"Unexpected error while writing accounts to file: {str(e)}")
-
 def reset_balances():
     global balances
     balances = []
     logger.debug("Balances reset successfully.")
 
-def update_balance_table(serial_number, username_text, balance, scheduled_time="N/A"):
-    global balances
-    for i, (serial, user, bal, sched_time) in enumerate(balances):
-        if serial == serial_number:
-            balances[i] = (serial_number, username_text, balance, scheduled_time)
-            return
-    balances.append((serial_number, username_text, balance, scheduled_time))
-    logger.debug(f"Balance updated for account {serial_number}: Username - {username_text}, Balance - {balance}, Scheduled Time - {scheduled_time}")
-
-
-def print_balance_table():
-    table = PrettyTable()
-    table.field_names = ["S/N", "Username", "Balance"]
-    for serial, user, bal in balances:
-        table.add_row([serial, user, bal])
-    print(table)
-    logger.info("Balance table printed successfully.")
-
-def export_balances_to_csv(filename='balances.csv'):
-    try:
-        with open(filename, 'w') as file:
-            file.write("S/N,Username,Balance\n")
-            for serial, user, bal in balances:
-                file.write(f"{serial},{user},{bal}\n")
-        logger.info(f"Balances exported to {filename} successfully.")
-    except IOError as e:
-        logger.error(f"Failed to export balances to CSV file: {str(e)}")
-    except Exception as e:
-        logger.exception(f"Unexpected error while exporting balances to CSV file: {str(e)}")
+def suppress_stacktrace(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (WebDriverException, StaleElementReferenceException) as e:
+            error_message = str(e).splitlines()[0]
+            logger.warning(f"{func.__name__}: Exception occurred: {error_message}")
+        except Exception as e:
+            logger.error(f"Unexpected error in {func.__name__}: {e}")
+    return wrapper
