@@ -2,7 +2,7 @@ import logging
 import random
 import time
 from telegram_bot_automation import TelegramBotAutomation
-from utils import read_accounts_from_file, write_accounts_to_file, reset_balances
+from utils import read_accounts_from_file, write_accounts_to_file, reset_balances, setup_logger
 from colorama import Fore, Style
 from prettytable import PrettyTable
 from datetime import datetime, timedelta
@@ -28,32 +28,8 @@ def load_settings():
 settings = load_settings()
 
 # Настройка логирования
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger = setup_logger()
 
-if not logger.hasHandlers():
-    class CustomFormatter(logging.Formatter):
-        COLORS = {
-            logging.DEBUG: Fore.CYAN,
-            logging.INFO: Fore.GREEN,
-            logging.WARNING: Fore.YELLOW,
-            logging.ERROR: Fore.RED,
-            logging.CRITICAL: Fore.MAGENTA,
-        }
-
-        def format(self, record):
-            record.asctime = self.formatTime(record, self.datefmt).split('.')[0]
-            log_message = super().format(record)
-            log_message = log_message.replace(record.asctime, f"{Fore.LIGHTYELLOW_EX}{record.asctime}{Style.RESET_ALL}")
-            levelname = f"{self.COLORS.get(record.levelno, Fore.WHITE)}{record.levelname}{Style.RESET_ALL}"
-            log_message = log_message.replace(record.levelname, levelname)
-            message_color = self.COLORS.get(record.levelno, Fore.WHITE)
-            log_message = log_message.replace(record.msg, f"{message_color}{record.msg}{Style.RESET_ALL}")
-            return log_message
-
-    handler = logging.StreamHandler()
-    handler.setFormatter(CustomFormatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(handler)
 
 # Глобальные переменные
 balance_dict = {}
@@ -61,6 +37,7 @@ balance_lock = Lock()
 exit_flag = False
 TIMERS_FILE = "timers.json"
 account_lock = Lock()
+browser_profile_lock = Lock()
 
 def load_timers():
     """Загрузка таймеров из JSON-файла."""
@@ -87,11 +64,14 @@ def process_account(account, balance_dict, active_timers):
     logger.info(f"Processing account: {account}")
     retry_count = 0
     success = False
+
     with account_lock:  # Гарантируем, что одновременно обрабатывается только один аккаунт
         while retry_count < 3 and not success and not exit_flag:
             try:
-                # Инициализация объекта TelegramBotAutomation для каждой попытки
-                bot = TelegramBotAutomation(account, settings)
+                # Блокировка на использование браузерного профиля
+                with browser_profile_lock:
+                    # Инициализация объекта TelegramBotAutomation для каждой попытки
+                    bot = TelegramBotAutomation(account, settings)
 
                 # Навигация и выполнение задач
                 navigate_and_perform_actions(bot)
@@ -111,7 +91,7 @@ def process_account(account, balance_dict, active_timers):
                 if next_schedule:
                     schedule_next_run(account, next_schedule, balance_dict, active_timers)
             except KeyboardInterrupt:
-                logger.info("KeyboardInterrupt detected in process_account. Exiting...")
+                logger.debug("KeyboardInterrupt detected in process_account. Exiting...")
                 exit_flag = True  # Устанавливаем флаг выхода
                 raise  # Прерывание поднимается выше для обработки в __main__
             except Exception as e:
@@ -136,7 +116,7 @@ def process_account(account, balance_dict, active_timers):
         logger.error(f"Account {account}: Failed after 3 retries.")
 
     # Вызов таблицы после обработки аккаунта
-    generate_and_display_table(balance_dict,  table_type="balance",show_total=True)
+    generate_and_display_table(balance_dict,  table_type="balance", show_total=True)
 
 
 
@@ -225,7 +205,7 @@ def schedule_next_run(account, next_schedule, balance_dict, active_timers):
         timer = Timer(delay, run_after_delay)
         active_timers.append(timer)
         timer.start()
-        logger.info(f"Account {account}: Timer set for {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}.")
+        logger.debug(f"Account {account}: Timer set for {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}.")
 
 
 
@@ -255,13 +235,11 @@ def schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_
 def generate_and_display_table(data, table_type="balance", show_total=True):
     """
     Универсальная функция для генерации и вывода таблиц.
-
-    :param data: Данные для отображения (balance_dict или timers_data).
-    :param table_type: Тип таблицы ("balance" или "timers").
-    :param show_total: Показывать ли общий баланс (только для таблицы балансов).
+    Исключает устаревшие таймеры.
     """
     table = PrettyTable()
     total_balance = 0
+    now = datetime.now()  # Инициализация текущего времени
 
     if table_type == "balance":
         table.field_names = ["ID", "Username", "Balance", "Next Scheduled Time", "Status"]
@@ -273,11 +251,16 @@ def generate_and_display_table(data, table_type="balance", show_total=True):
             )
 
             for account, details in sorted_data:
+                try:
+                    next_schedule_time = datetime.strptime(details["next_schedule"], "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    continue  # Пропускаем записи с некорректным временем
+                
+                if next_schedule_time < now:
+                    continue  # Пропускаем устаревшие таймеры
+                
                 balance = int(details["balance"]) if details["balance"] == int(details["balance"]) else round(details["balance"])
-                next_schedule = (
-                    datetime.strptime(details["next_schedule"], "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
-                    if details["next_schedule"] != "N/A" else "N/A"
-                )
+                next_schedule = next_schedule_time.strftime("%Y-%m-%d %H:%M:%S")
                 color = Fore.RED if details["status"] == "ERROR" else Fore.CYAN
                 table.add_row([
                     f"{color}{account}{Style.RESET_ALL}",
@@ -301,6 +284,14 @@ def generate_and_display_table(data, table_type="balance", show_total=True):
         )
 
         for account, details in sorted_data:
+            try:
+                next_schedule_time = datetime.strptime(details["next_schedule"], "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue  # Пропускаем записи с некорректным временем
+            
+            if next_schedule_time < now:
+                continue  # Пропускаем устаревшие таймеры
+            
             username = details.get("username", "N/A")
             next_schedule = details["next_schedule"]
             status = details["status"]
@@ -313,6 +304,8 @@ def generate_and_display_table(data, table_type="balance", show_total=True):
             ])
 
         logger.info("\nActive Timers Table:\n" + str(table))
+
+
 
 def sync_timers_with_balance(balance_dict):
     """
@@ -338,8 +331,8 @@ if __name__ == "__main__":
     try:
         reset_balances()
         accounts = read_accounts_from_file()
-        random.shuffle(accounts)
-        write_accounts_to_file(accounts)
+        #random.shuffle(accounts)
+        #write_accounts_to_file(accounts)
 
         active_timers = []
         timers_data = load_timers()
@@ -369,7 +362,7 @@ if __name__ == "__main__":
                 try:
                     process_account(account, balance_dict, active_timers)  # Обработка аккаунта
                 except KeyboardInterrupt:
-                    logger.info("KeyboardInterrupt detected during account processing.")
+                    logger.debug("KeyboardInterrupt detected during account processing.")
                     exit_flag = True
                     break  # Прерываем цикл обработки аккаунтов
                 except Exception as e:
