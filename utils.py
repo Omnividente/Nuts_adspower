@@ -1,6 +1,7 @@
 import logging
 from colorama import Fore, Style, init
 from functools import wraps
+from selenium.common.exceptions import WebDriverException, StaleElementReferenceException 
 
 # Инициализация colorama для Windows
 init(autoreset=True)

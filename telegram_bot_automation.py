@@ -200,7 +200,6 @@ class TelegramBotAutomation:
             except Exception:
                 pass
     
-    @suppress_stacktrace
     def navigate_to_bot(self):
         self.clear_browser_cache_and_reload()
         time.sleep(5)
@@ -222,7 +221,7 @@ class TelegramBotAutomation:
                 retries += 1
                 time.sleep(5)
         return False
-
+    
     @suppress_stacktrace
     def close_extra_windows(self):
         try:
