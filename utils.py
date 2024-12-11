@@ -1,7 +1,6 @@
 import logging
 from colorama import Fore, Style, init
 from functools import wraps
-from selenium.common.exceptions import WebDriverException, StaleElementReferenceException 
 
 # Инициализация colorama для Windows
 init(autoreset=True)
@@ -108,15 +107,3 @@ def reset_balances():
     global balances
     balances = []
     logger.debug("Balances reset successfully.")
-
-def suppress_stacktrace(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except (WebDriverException, StaleElementReferenceException) as e:
-            error_message = str(e).splitlines()[0]
-            logger.warning(f"{func.__name__}: Exception occurred: {error_message}")
-        except Exception as e:
-            logger.error(f"Unexpected error in {func.__name__}: {e}")
-    return wrapper
