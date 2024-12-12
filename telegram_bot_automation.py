@@ -545,7 +545,7 @@ class TelegramBotAutomation:
         for xpath, success_msg in actions:
             retries = 0
             logger.debug(f"#{self.serial_number}: Starting action for XPath: {xpath}")
-            
+
             while retries < self.MAX_RETRIES:
                 try:
                     # Поиск элемента по XPath
@@ -562,20 +562,20 @@ class TelegramBotAutomation:
                     logger.debug(
                         f"#{self.serial_number}: Sleeping for {sleep_time} seconds after action.")
                     time.sleep(sleep_time)
-                    break  # Завершаем попытки, если успешно нажали
+                    break  # Успешное завершение действия
                 except NoSuchElementException:
                     logger.debug(f"#{self.serial_number}: Element not found for action: {success_msg}. Skipping.")
-                    break
+                    break  # Пропускаем текущую кнопку
                 except WebDriverException as e:
                     retries += 1
                     logger.debug(
                         f"#{self.serial_number}: Failed action (attempt {retries}): {str(e).splitlines()[0]}")
                     time.sleep(5)
                     if retries >= self.MAX_RETRIES:
-                        logger.error(f"#{self.serial_number}: Exceeded maximum retries for action: {success_msg}")
+                        logger.debug(f"#{self.serial_number}: Exceeded maximum retries for action: {success_msg}")
                         break
                 except Exception as e:
-                    logger.error(f"#{self.serial_number}: Unexpected error during action '{success_msg}': {str(e)}")
+                    logger.debug(f"#{self.serial_number}: Unexpected error during action '{success_msg}': {str(e)}")
                     break
             logger.debug(f"#{self.serial_number}: Finished processing action: {success_msg}")
 
@@ -797,23 +797,27 @@ class TelegramBotAutomation:
             retries = 0
             while retries < self.MAX_RETRIES:
                 try:
-                    button = self.driver.find_element(By.XPATH, xpath)
-                    button.click()
-                    logger.info(f"#{self.serial_number}: {success_msg}")
-                    sleep_time = random.randint(3, 4)
-                    logger.debug(
-                        f"#{self.serial_number}: Sleeping for {sleep_time} seconds before next action.")
-                    time.sleep(sleep_time)
-                    break
-                except NoSuchElementException:
-                    logger.debug(
-                        f"#{self.serial_number}: Element not found for action: {success_msg}. Skipping...")
-                    break
+                    logger.debug(f"#{self.serial_number}: Attempting action: {success_msg}")
+                    
+                    button = self.wait_for_element(By.XPATH, xpath, timeout=10)
+                    if button:
+                        button.click()
+                        logger.info(f"#{self.serial_number}: {success_msg}")
+                        
+                        sleep_time = random.randint(3, 4)
+                        logger.debug(
+                            f"#{self.serial_number}: Sleeping for {sleep_time} seconds before next action.")
+                        time.sleep(sleep_time)
+                        break
+                    else:
+                        logger.debug(f"#{self.serial_number}: Element not found for action: {success_msg}. Skipping...")
+                        break
                 except WebDriverException as e:
                     retries += 1
                     logger.warning(
                         f"#{self.serial_number}: Failed action (attempt {retries}): {str(e).splitlines()[0]}")
                     logger.debug(traceback.format_exc())
                     time.sleep(5)
+
 
 

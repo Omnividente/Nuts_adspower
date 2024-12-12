@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 from threading import Timer, Lock
 import json
 import os
+import argparse
+import sys
+
 ###################################################################################################################
 ###################################################################################################################
 # Загрузка настроек
@@ -331,19 +334,45 @@ def sync_timers_with_balance(balance_dict):
                     "status": timer_info["status"]
                 }
 
+def main():
+    global exit_flag  # Используем глобальную переменную для корректного завершения
 
+    # Настройка аргументов командной строки
+    parser = argparse.ArgumentParser(description="Run the script with optional debug logging.")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--account", type=int, help="Force processing a specific account")
+    args = parser.parse_args()
 
-if __name__ == "__main__":
+    # Настройка логирования
+    logger = setup_logger(debug_mode=args.debug, log_to_file=args.debug)
+
+    # Инициализация переменных
+    active_timers = []
+    timers_data = load_timers()
+
+    # Принудительный запуск аккаунта
+    if args.account:
+        logger.debug(f"Processing account {args.account} in debug mode...")
+        try:
+            process_account(args.account, balance_dict, active_timers)
+            logger.info(f"Account {args.account} processing completed. Exiting.")
+        except Exception as e:
+            logger.error(f"Error during forced account processing: {e}")
+        finally:
+            # Завершение активных таймеров и ресурсов
+            for timer in active_timers:
+                if timer.is_alive():
+                    timer.cancel()
+            logger.info("All resources cleaned up. Exiting gracefully.")
+            sys.exit(0)  # Завершаем выполнение после обработки аккаунта
+
     try:
         reset_balances()
         accounts = read_accounts_from_file()
-        #random.shuffle(accounts)
-        #write_accounts_to_file(accounts)
 
-        active_timers = []
-        timers_data = load_timers()
         # Синхронизация таймеров с балансами
         sync_timers_with_balance(balance_dict)
+
         # Вывод таблицы активных таймеров
         logger.info("Loading active timers...")
         generate_and_display_table(timers_data, table_type="timers")
@@ -365,7 +394,7 @@ if __name__ == "__main__":
                 else:
                     # Таймер истек, запускаем немедленно
                     process_account(account, balance_dict, active_timers)
-            else:        
+            else:
                 try:
                     process_account(account, balance_dict, active_timers)  # Обработка аккаунта
                 except KeyboardInterrupt:
@@ -385,7 +414,7 @@ if __name__ == "__main__":
             logger.info("All accounts processed. Waiting for timers to complete...")
             while not exit_flag and any(timer.is_alive() for timer in active_timers):
                 time.sleep(1)
-        
+
             # Ожидание завершения всех таймеров
             while not exit_flag and any(timer.is_alive() for timer in active_timers):
                 time.sleep(1)
@@ -401,11 +430,17 @@ if __name__ == "__main__":
     finally:
         # Остановка всех активных таймеров
         logger.info("Cleaning up active timers...", extra={'color': Fore.YELLOW})
-        
+
         for timer in active_timers:
             if timer.is_alive():
                 timer.cancel()
         logger.info("All resources cleaned up. Exiting gracefully.", extra={'color': Fore.MAGENTA})
+
+
+
+if __name__ == "__main__":
+    main()
+
 
 
 
