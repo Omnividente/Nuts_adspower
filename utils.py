@@ -1,6 +1,6 @@
 import logging
 from colorama import Fore, Style, init
-from functools import wraps
+import os
 
 # Инициализация colorama для Windows
 init(autoreset=True)
@@ -63,16 +63,41 @@ class CustomFormatter(logging.Formatter):
 
 
 # Функция для настройки логирования
-def setup_logger():
-    global logger
-    if logger is None:
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.INFO)  # Установите уровень логирования на DEBUG или INFO
+def setup_logger(debug_mode=False, log_to_file=False):
+    """
+    Настройка логирования с опциональной записью в файл.
+    :param debug_mode: Включение режима DEBUG.
+    :param log_to_file: Если True, логи записываются в файл в режиме DEBUG.
+    """
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
 
-        # Настроим обработчик для вывода логов в консоль
-        handler = logging.StreamHandler()
-        handler.setFormatter(CustomFormatter('%(asctime)s - %(levelname)s - %(message)s'))
-        logger.addHandler(handler)
+    # Удаляем старые обработчики, если они были
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
+    # Форматирование логов
+    formatter = CustomFormatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Обработчик для консоли
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # Обработчик для файла только в режиме DEBUG
+    if debug_mode and log_to_file:
+        log_file = "debug.log"
+
+        # Удаляем файл, если он существует
+        if os.path.exists(log_file):
+            os.remove(log_file)
+
+        # Создаём новый обработчик для файла
+        file_handler = logging.FileHandler(log_file, mode='w')
+        # Без цветового форматирования для файла
+        file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
 
     return logger
 
