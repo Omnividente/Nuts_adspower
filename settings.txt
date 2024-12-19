@@ -11,7 +11,7 @@ REPOSITORY_URL=https://github.com/Omnividente/Nuts_adspower
 UPDATE_INTERVAL=10800
 
 # Включение/выключение автоматических обновлений
-AUTO_UPDATE=true
+AUTO_UPDATE=false
 
 # Список файлов для проверки обновлений (через запятую)
 FILES_TO_UPDATE=remote_files_for_update
