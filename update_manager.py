@@ -1,324 +1,276 @@
 import os
-import sys
 import subprocess
 import requests
-import hashlib
-import logging
-import json
-from threading import Timer
-from datetime import datetime, timedelta
-from prettytable import PrettyTable
+import sys
+import time
+from threading import Lock
+from utils import setup_logger, load_settings, GlobalFlags, stop_event
 from colorama import Fore, Style
 
-# Настройка логирования
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger = setup_logger()
+update_lock = Lock()
 
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-
-TIMER_FILE = "timers.json"
+# ========================= Классы ==========================
 
 
-class UpdateManager:
-    def __init__(self, settings):
-        """
-        :param settings: Словарь настроек, загружаемый из settings.txt.
-        """
-        self.settings = settings
-        self.update_enabled = settings.get("ENABLE_UPDATES", "true").lower() == "true"
-        self.repo_url = settings.get("REPO_URL", "").strip()
-        self.file_list = settings.get("FILES_TO_UPDATE", "").strip().split(",")
-        self.local_dir = os.path.dirname(os.path.abspath(__file__))
-        self.update_interval = int(settings.get("UPDATE_INTERVAL", 3 * 3600))  # Интервал в секундах
-        self.git_available = self.check_git_installed()
-
-    def check_git_installed(self):
-        """Проверяет, установлен ли Git."""
+class GitUpdater:
+    """
+    Класс для обновления через Git.
+    """
+    @staticmethod
+    def is_git_installed():
         try:
-            subprocess.check_output(["git", "--version"], stderr=subprocess.STDOUT, text=True)
-            logger.info("Git is installed and available.")
+            subprocess.run(["git", "--version"], stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, check=True)
+            logger.debug("Git is installed on the system.")
             return True
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            logger.warning("Git is not installed. Falling back to direct file updates.")
+        except FileNotFoundError:
+            logger.debug("Git is not installed on this system.")
+            return False
+        except Exception as e:
+            logger.error(f"Error while checking for Git installation: {e}")
             return False
 
-    def update_with_git(self):
-        """Обновляет скрипт через Git."""
-        if not self.update_enabled:
-            logger.info("Updates are disabled in settings.")
-            return False
-
-        if not self.git_available:
-            logger.warning("Git is not available. Skipping Git update.")
-            return False
-
+    @staticmethod
+    def check_updates():
         try:
-            # Пробуем выполнить git pull
-            result = subprocess.check_output(["git", "pull"], stderr=subprocess.STDOUT, text=True)
-            logger.info(f"Git output:\n{result}")
-            
-            if "Aborting" in result:
-                logger.warning("Git aborted the update due to conflicts. Attempting to reset and pull again...")
-                # Принудительный сброс локальных изменений
-                subprocess.check_output(["git", "reset", "--hard"], stderr=subprocess.STDOUT, text=True)
-                subprocess.check_output(["git", "pull"], stderr=subprocess.STDOUT, text=True)
-                logger.info("Git update completed successfully after reset.")
-                return True
+            logger.debug("Checking for updates via Git...")
+            subprocess.run(["git", "fetch"], stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, check=True)
+            result = subprocess.run(
+                ["git", "status", "-uno"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            output = result.stdout.decode("utf-8")
+            logger.debug(f"Git status output: {output}")
+            return "Your branch is behind" in output
+        except Exception as e:
+            logger.warning(f"Git update check failed: {e}")
+            return False
 
-            if "Already up to date." not in result:
-                logger.info("Script updated successfully via Git.")
-                return True  # Обновление выполнено
-            else:
-                logger.info("No updates found via Git.")
-                return False  # Обновления нет
+    @staticmethod
+    def perform_update():
+        try:
+            logger.info("Updating via Git...")
+            subprocess.run(["git", "pull"], stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, check=True)
+            logger.info("Update completed successfully via Git.")
+            return True
         except subprocess.CalledProcessError as e:
-            logger.error(f"Error updating with Git:\n{e.output}")
-            return False  # Ошибка при обновлении
-
-    def get_remote_file_hash(self, file_url):
-        """Получает хэш удалённого файла (MD5)."""
-        try:
-            response = requests.get(file_url, stream=True)
-            response.raise_for_status()
-            md5 = hashlib.md5()
-            for chunk in response.iter_content(chunk_size=4096):
-                md5.update(chunk)
-            return md5.hexdigest()
-        except requests.RequestException as e:
-            logger.error(f"Error fetching remote file hash for {file_url}: {e}")
-            return None
-
-    def get_local_file_hash(self, file_path):
-        """Вычисляет хэш локального файла (MD5)."""
-        if not os.path.exists(file_path):
-            return None
-        md5 = hashlib.md5()
-        try:
-            with open(file_path, "rb") as f:
-                while chunk := f.read(4096):
-                    md5.update(chunk)
-            return md5.hexdigest()
-        except IOError as e:
-            logger.error(f"Error reading local file {file_path}: {e}")
-            return None
-
-    def convert_to_raw_url(self, repo_url, file_name):
-        """
-        Преобразует URL репозитория в raw-ссылку для указанного файла.
-        Поддерживает:
-        - https://github.com/username/repository
-        - git@github.com:username/repository.git
-        - https://github.com/username/repository.git
-        :param repo_url: Ссылка на репозиторий.
-        :param file_name: Имя файла для формирования ссылки.
-        :return: Преобразованный raw URL.
-        """
-        logger.debug(f"Original repo URL: {repo_url}, file name: {file_name}")
-
-        # Убираем ".git" и обрабатываем SSH-ссылки
-        if repo_url.endswith(".git"):
-            repo_url = repo_url.replace(".git", "")
-            logger.debug(f"Removed '.git': {repo_url}")
-        if repo_url.startswith("git@github.com:"):
-            repo_url = repo_url.replace("git@github.com:", "https://github.com/")
-            logger.debug(f"Converted SSH to HTTPS: {repo_url}")
-
-        # Используем ветку по умолчанию
-        branch = self.settings.get("DEFAULT_BRANCH", "main")
-        logger.debug(f"Using branch: {branch}")
-
-        raw_url = repo_url.replace("github.com", "raw.githubusercontent.com")
-        raw_url = f"{raw_url}/{branch}/{file_name.strip()}"
-        logger.debug(f"Constructed raw URL: {raw_url}")
-
-        return raw_url
-    
-
-    def update_file(self, file_name):
-        """Обновляет файл, если он изменился."""
-        if not self.repo_url:
-            logger.warning("REPO_URL is not configured in settings.")
-            return False
-
-        remote_url = self.convert_to_raw_url(self.repo_url, file_name)
-        local_path = os.path.join(self.local_dir, file_name.strip())
-
-        logger.info(f"Checking for updates to {file_name}...")
-
-        # Получаем хэши
-        remote_hash = self.get_remote_file_hash(remote_url)
-        local_hash = self.get_local_file_hash(local_path)
-
-        if not remote_hash:
-            logger.error(f"Unable to fetch remote hash for {file_name}. Skipping update.")
-            return False
-
-        if remote_hash == local_hash:
-            logger.info(f"No updates found for {file_name}.")
-            return False
-
-        # Если файл действительно отличается, обновляем его
-        try:
-            logger.info(f"Updating file {file_name}...")
-            response = requests.get(remote_url)
-            response.raise_for_status()
-            with open(local_path, "wb") as f:
-                f.write(response.content)
-            logger.info(f"File {file_name} updated successfully.")
-            return True
-        except requests.RequestException as e:
-            logger.error(f"Error updating file {file_name}: {e}")
-            return False
-
-
-
-
-
-    def update_with_files(self):
-        """Обновляет файлы из списка через прямое скачивание."""
-        if not self.update_enabled:
-            logger.info("Updates are disabled in settings.")
-            return False
-
-        if not self.repo_url:
-            logger.warning("REPO_URL is not configured in settings.")
-            return False
-
-        logger.info("Checking for updates via direct file download...")
-        updated = False
-        for file_name in self.file_list:
-            if self.update_file(file_name):
-                updated = True
-
-                # Немедленный выход, если обновился update_manager.py
-                if file_name.strip() == "update_manager.py":
-                    return updated
-        return updated
-
-
-
-    def check_and_update_all(self):
-        """Проверяет и обновляет файлы через Git или прямое скачивание."""
-        logger.info("Checking for updates...")
-        update_results = []
-
-        # Проверка обновлений через Git
-        git_updated = False
-        if self.git_available:
-            logger.info("Checking updates via Git...")
-            git_updated = self.update_with_git()
-            update_results.append(["Git", "Repository", "Updated" if git_updated else "No Changes"])
-
-        # Проверка обновлений через файлы
-        if not git_updated:  # Если Git не обновлял
-            logger.info("Checking for updates via direct file download...")
-            for file_name in self.file_list:
-                try:
-                    updated = self.update_file(file_name)
-                    status = "Updated" if updated else "No Changes"
-                    update_results.append(["Direct", file_name, status])
-                except Exception as e:
-                    logger.error(f"Error checking/updating {file_name}: {e}")
-                    update_results.append(["Direct", file_name, "Error"])
-
-        # Выводим таблицу результатов
-        table = PrettyTable()
-        table.field_names = ["Method", "Target", "Status"]
-
-        for method, target, status in update_results:
-            if status == "Updated":
-                color = Fore.GREEN
-            elif status == "No Changes":
-                color = Fore.YELLOW
-            else:  # Error
-                color = Fore.RED
-            table.add_row([method, target, f"{color}{status}{Style.RESET_ALL}"])
-
-        logger.info("\nUpdate Results:\n" + str(table))
-
-        # Перезапуск, если есть обновления
-        if any(row[2] == "Updated" for row in update_results):
-            self.restart_script()
-
-
-    def restart_script(self):
-        """Перезапускает текущий скрипт."""
-        logger.info("Restarting script to apply updates...")
-        python = sys.executable
-        os.execl(python, python, *sys.argv)
-
-    def save_timers_to_file(self, balance_dict):
-        """Сохраняет активные таймеры в файл."""
-        if not balance_dict:
-            logger.warning("No active timers to save.")
-            return
-
-        timers_to_save = []
-        for account, data in balance_dict.items():
-            timers_to_save.append({
-                "account": account,
-                "next_schedule": data.get("next_schedule", "N/A"),
-            })
-
-        try:
-            with open(TIMER_FILE, "w") as f:
-                json.dump(timers_to_save, f)
-            logger.info(f"Timers saved to {TIMER_FILE}.")
-        except Exception as e:
-            logger.error(f"Error saving timers to file: {e}")
-
-    def load_timers_from_file(self):
-        """Загружает таймеры из файла."""
-        if not os.path.exists(TIMER_FILE):
-            logger.info("No timers file found. Skipping restoration.")
-            return []
-
-        try:
-            with open(TIMER_FILE, "r") as f:
-                restored_timers = json.load(f)
-            logger.info(f"Restored {len(restored_timers)} timers from {TIMER_FILE}.")
-            return restored_timers
-        except Exception as e:
-            logger.error(f"Error loading timers from file: {e}")
-            return []
-
-    def restore_timers(self, balance_dict, process_account_callback):
-        """Восстанавливает активные таймеры из сохранённых данных."""
-        restored_timers = self.load_timers_from_file()
-        if not restored_timers:
-            logger.info("No timers to restore.")
-            return
-
-        for timer_data in restored_timers:
-            account = timer_data["account"]
-            next_schedule_str = timer_data["next_schedule"]
+            logger.warning(f"Git pull failed due to local changes: {e}")
             try:
-                next_schedule = datetime.strptime(next_schedule_str, "%Y-%m-%d %H:%M:%S")
-                delay = (next_schedule - datetime.now()).total_seconds()
+                logger.info("Resetting local changes...")
+                subprocess.run(["git", "reset", "--hard"],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                logger.info("Retrying git pull after resetting changes...")
+                subprocess.run(["git", "pull"], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, check=True)
+                logger.info(
+                    "Update completed successfully after resetting local changes.")
+                return True
+            except subprocess.CalledProcessError as reset_error:
+                logger.error(
+                    f"Update failed even after resetting changes: {reset_error}")
+                return False
 
-                if delay > 0:
-                    timer = Timer(
-                        delay,
-                        process_account_callback,
-                        args=(account, balance_dict)
-                    )
-                    timer.start()
-                    logger.info(f"Restored timer for account {account}, scheduled in {delay:.2f} seconds.")
+
+class FileUpdater:
+    """
+    Класс для обновления файлов напрямую через raw URL.
+    """
+    @staticmethod
+    def check_updates():
+        """
+        Проверяет обновления для локальных файлов на основе удалённого репозитория.
+        Если указан файл remote_files_for_update, загружает список файлов из него.
+        """
+        settings = load_settings()
+        repo_url = settings.get("REPOSITORY_URL")
+        files_to_update = [file.strip() for file in settings.get(
+            "FILES_TO_UPDATE", "").split(",") if file.strip()]
+        branch = "main"  # Укажите ветку
+
+        if not repo_url:
+            logger.error("Repository URL is not specified in settings.")
+            return False, []
+
+        # Проверяем наличие специального файла remote_files_for_update
+        if "remote_files_for_update" in files_to_update:
+            logger.info("Fetching file list from remote_files_for_update...")
+            try:
+                # Формируем URL для получения файла remote_files_for_update
+                timestamp = int(time.time())
+                raw_url = f"https://raw.githubusercontent.com/{repo_url.split('/')[-2]}/{repo_url.split('/')[-1]}/{branch}/remote_files_for_update?nocache={timestamp}"
+                headers = {"Cache-Control": "no-cache"}
+                response = requests.get(raw_url, headers=headers, timeout=10)
+                response.raise_for_status()
+
+                # Загрузка и парсинг файла
+                remote_files_content = response.text.strip()
+                files_to_update = [
+                    file.strip() for file in remote_files_content.splitlines() if file.strip()]
+                logger.info(f"Fetched files from remote_files_for_update: {files_to_update}")
             except Exception as e:
-                logger.error(f"Error restoring timer for account {account}: {e}")
+                logger.error(f"Failed to fetch remote_files_for_update: {e}")
+                return False, []
 
-    def schedule_update_check(self):
-        """Планирует проверку обновлений."""
-        if not self.update_enabled:
-            logger.info("Updates are disabled in settings. Skipping scheduled update check.")
-            return
+        if not files_to_update:
+            logger.error("No files specified in FILES_TO_UPDATE or remote_files_for_update.")
+            return False, []
 
-        next_check_time = datetime.now() + timedelta(seconds=self.update_interval)
-        logger.info(f"Scheduling next update check at {next_check_time.strftime('%Y-%m-%d %H:%M:%S')}.")
+        updates = []
+        headers = {
+            "Cache-Control": "no-cache"  # Принудительное обновление без кэширования
+        }
 
-        timer = Timer(self.update_interval, self.check_and_update_all)
-        timer.start()
+        for file_path in files_to_update:
+            try:
+                # Формируем URL для получения файла через raw.githubusercontent.com с параметром для обхода кэша
+                timestamp = int(time.time())
+                raw_url = f"https://raw.githubusercontent.com/{repo_url.split('/')[-2]}/{repo_url.split('/')[-1]}/{branch}/{file_path}?nocache={timestamp}"
+
+                # Отправляем запрос
+                response = requests.get(raw_url, headers=headers, timeout=10)
+                response.raise_for_status()
+
+                # Получаем удалённое содержимое файла
+                remote_content = response.content
+
+                # Проверяем локальный файл
+                if os.path.exists(file_path):
+                    with open(file_path, "rb") as f:
+                        local_content = f.read()
+                    # Сравниваем локальное и удалённое содержимое
+                    if local_content != remote_content:
+                        updates.append(file_path)
+                else:
+                    updates.append(file_path)
+
+            except Exception as e:
+                logger.error(f"Error checking file {file_path}: {e}")
+
+        # Логируем список обновлений в конце
+        if updates:
+            logger.info(f"Updates found for the following files: {updates}")
+        else:
+            logger.debug("No updates found.")
+
+        return bool(updates), updates
+
+
+    @staticmethod
+    def perform_update(update_files, repo_url, stop_on_failure=True):
+        """
+        Обновляет файлы через URL и создаёт резервные копии.
+        Возвращает True при успешном обновлении всех файлов, иначе False.
+        """
+        logger.info("Updating files directly via raw URLs...")
+        if repo_url.endswith(".git"):
+            repo_url = repo_url[:-4]
+
+        branch = "main"  # Укажите ветку
+        success = True   # Флаг успешности
+
+        for file_path in update_files:
+            try:
+                logger.info(f"Updating file: {file_path}")
+
+                # Добавление уникального параметра для обхода кэша
+                timestamp = int(time.time())
+                raw_url = (
+                    f"https://raw.githubusercontent.com/"
+                    f"{repo_url.split('/')[-2]}/{repo_url.split('/')[-1]}/{branch}/{file_path}?nocache={timestamp}"
+                )
+
+                # Установка заголовка Cache-Control для запросов
+                headers = {"Cache-Control": "no-cache"}
+                response = requests.get(raw_url, headers=headers, timeout=10)
+                response.raise_for_status()
+
+                content = response.content
+
+                # Создание резервной копии
+                backup_path = f"{file_path}.backup"
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+
+                if os.path.exists(file_path):
+                    os.rename(file_path, backup_path)
+
+                # Запись файла
+                with open(file_path, "wb") as f:
+                    f.write(content)
+
+                logger.info(f"File {file_path} updated successfully.")
+
+            except Exception as e:
+                logger.error(f"Error updating file {file_path}: {e}")
+                success = False
+                if stop_on_failure:
+                    raise  # Немедленное прерывание, если флаг установлен
+
+        return success
+
+
+# ========================= Основная логика ==========================
+
+
+def restart_script():
+    # signal.signal(signal.SIGINT, signal.default_int_handler)
+    """Перезапускает текущий скрипт."""
+    python = sys.executable  # Путь к Python
+    args = [python] + sys.argv  # Все аргументы командной строки
+    try:
+        # Создаём новый процесс
+        GlobalFlags.interrupted = True
+        logger.info("Restarting script...",
+                    extra={'color': Fore.YELLOW})
+        os.spawnv(os.P_WAIT, python, args)
+
+    except KeyboardInterrupt:
+        if not GlobalFlags.interrupted:  # Обрабатываем только один раз
+            logger.warning("Restart interrupted by KeyboardInterrupt.")
+            GlobalFlags.interrupted = True
+        sys.exit(1)  # Завершаем текущий процесс с кодом ошибки
+    except Exception as e:
+        logger.error(f"Error during script restart: {e}")
+        sys.exit(1)  # Завершаем текущий процесс с кодом ошибки
+    finally:
+        if not GlobalFlags.interrupted:
+            logger.info("Exiting current process.")
+        sys.exit(0)
+
+
+def check_and_update(priority_task_queue, is_task_active):
+    """
+    Проверяет обновления и выполняет необходимые действия.
+    """
+    settings = load_settings()
+    auto_update_enabled = settings.get("AUTO_UPDATE", "true").lower() == "true"
+
+    try:
+        if GitUpdater.is_git_installed() and GitUpdater.check_updates():
+            logger.info("Git updates found. Performing update...")
+            if GitUpdater.perform_update():
+                logger.debug(
+                    "Update successful. Stopping processes for restart...")
+                stop_event.set()  # Останавливаем потоки
+                stop_event.restart_mode = True
+        else:
+            updates_available, update_files = FileUpdater.check_updates()
+            if updates_available:
+                if auto_update_enabled:
+                    logger.info("File updates found. Performing update...")
+                    if FileUpdater.perform_update(
+                        update_files, settings.get("REPOSITORY_URL")
+                    ):
+                        stop_event.set()  # Останавливаем потоки
+                        stop_event.restart_mode = True
+                else:
+                    logger.info(
+                        "Automatic updates are disabled. Updates available:")
+                    for file in update_files:
+                        logger.info(f" - {file}")
+            else:
+                logger.debug("No updates found.")
+
+    except Exception as e:
+        logger.error(f"Error during check_and_update: {e}")
