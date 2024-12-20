@@ -11,6 +11,9 @@ Thumbs.db
 
 # Игнорировать папку build
 /build/
+/docs/
 
 # Игнорировать конфиденциальные файлы
 settings.txt
+accounts.txt
+README.md
