@@ -94,7 +94,7 @@ class FileUpdater:
 
         # Проверяем наличие специального файла remote_files_for_update
         if "remote_files_for_update" in files_to_update:
-            logger.info("Fetching file list from remote_files_for_update...")
+            logger.debug("Fetching file list from remote_files_for_update...")
             try:
                 # Формируем URL для получения файла remote_files_for_update
                 timestamp = int(time.time())
@@ -107,13 +107,15 @@ class FileUpdater:
                 remote_files_content = response.text.strip()
                 files_to_update = [
                     file.strip() for file in remote_files_content.splitlines() if file.strip()]
-                logger.info(f"Fetched files from remote_files_for_update: {files_to_update}")
+                logger.debug(
+                    f"Fetched files from remote_files_for_update: {files_to_update}")
             except Exception as e:
-                logger.error(f"Failed to fetch remote_files_for_update: {e}")
+                logger.debug(f"Failed to fetch remote_files_for_update: {e}")
                 return False, []
 
         if not files_to_update:
-            logger.error("No files specified in FILES_TO_UPDATE or remote_files_for_update.")
+            logger.error(
+                "No files specified in FILES_TO_UPDATE or remote_files_for_update.")
             return False, []
 
         updates = []
@@ -149,12 +151,11 @@ class FileUpdater:
 
         # Логируем список обновлений в конце
         if updates:
-            logger.info(f"Updates found for the following files: {updates}")
+            logger.debug(f"Updates found for the following files: {updates}")
         else:
             logger.debug("No updates found.")
 
         return bool(updates), updates
-
 
     @staticmethod
     def perform_update(update_files, repo_url, stop_on_failure=True):
@@ -266,9 +267,9 @@ def check_and_update(priority_task_queue, is_task_active):
                         stop_event.restart_mode = True
                 else:
                     logger.info(
-                        "Automatic updates are disabled. Updates available:")
+                        "Automatic updates are disabled. Updates available:", extra={'color': Fore.CYAN})
                     for file in update_files:
-                        logger.info(f" - {file}")
+                        logger.info(f"   {file}", extra={'color': Fore.CYAN})
             else:
                 logger.debug("No updates found.")
 
