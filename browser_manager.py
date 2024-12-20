@@ -6,7 +6,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
 import traceback
-from utils import setup_logger
+from utils import setup_logger, visible, stop_event
 from colorama import Fore, Style
 
 # Настройка логирования
@@ -19,6 +19,7 @@ class BrowserManager:
     def __init__(self, serial_number):
         self.serial_number = serial_number
         self.driver = None
+        self.headless_mode = 0 if visible.is_set() else 1
 
     def check_browser_status(self):
         """
@@ -123,7 +124,7 @@ class BrowserManager:
                 # Формирование URL для запуска браузера
                 request_url = (
                     f'http://local.adspower.net:50325/api/v1/browser/start?'
-                    f'serial_number={self.serial_number}&ip_tab=0&headless=1'
+                    f'serial_number={self.serial_number}&ip_tab=0&headless={self.headless_mode}'
                 )
                 logger.debug(
                     f"#{self.serial_number}: Request URL for starting browser: {request_url}")
@@ -187,70 +188,58 @@ class BrowserManager:
 
         logger.error(
             f"#{self.serial_number}: Failed to start browser after {self.MAX_RETRIES} retries.")
-        return False
+        return False    
 
     def close_browser(self):
         """
-        Закрывает браузер с использованием API и WebDriver, с приоритетом на API.
+        Закрывает браузер с использованием WebDriver как основного способа и API как резервного.
         """
-        logger.debug(
-            f"#{self.serial_number}: Initiating browser closure process.")
+        logger.debug(f"#{self.serial_number}: Initiating browser closure process.")
 
         # Флаг для предотвращения повторного закрытия
         if getattr(self, "browser_closed", False):
-            logger.debug(
-                f"#{self.serial_number}: Browser already closed. Skipping closure.")
+            logger.debug(f"#{self.serial_number}: Browser already closed. Skipping closure.")
             return False
 
         self.browser_closed = True  # Устанавливаем флаг перед попыткой закрытия
 
-        # Попытка остановить браузер через API
+        # Попытка закрыть браузер через WebDriver
+        if not stop_event.is_set():            
+            try:
+                if self.driver:
+                    logger.debug(f"#{self.serial_number}: Attempting to close Chromedriver via WebDriver.")
+                    self.driver.quit()  # Закрываем все окна и завершаем сессию WebDriver                    
+                    logger.debug(f"#{self.serial_number}: Chromedriver closed successfully via WebDriver.")
+            except WebDriverException as e:
+                logger.debug(f"#{self.serial_number}: WebDriverException while closing Chromedriver: {str(e)}")
+            except Exception as e:
+                logger.debug(f"#{self.serial_number}: General exception while closing Chromedriver via WebDriver: {str(e)}")
+            finally:
+                # Устанавливаем driver в None
+                self.driver = None
+                logger.debug(f"#{self.serial_number}: Resetting driver to None.")        
         try:
-            logger.debug(
-                f"#{self.serial_number}: Attempting to stop browser via API.")
+            logger.debug(f"#{self.serial_number}: Attempting to stop browser via API as fallback.")
             response = requests.get(
                 'http://local.adspower.net:50325/api/v1/browser/stop',
                 params={'serial_number': self.serial_number},
-                timeout=25  # Тайм-аут для API-запроса
+                timeout=10
             )
             response.raise_for_status()
             data = response.json()
-            logger.debug(
-                f"#{self.serial_number}: API response for browser stop: {data}")
+            logger.debug(f"#{self.serial_number}: API response for browser stop: {data}")
 
             if data.get('code') == 0:
-                logger.debug(
-                    f"#{self.serial_number}: Browser stopped via API successfully.")
+                logger.debug(f"#{self.serial_number}: Browser stopped successfully via API.")
                 return True
             else:
-                logger.warning(
-                    f"#{self.serial_number}: API stop returned unexpected code: {data.get('code')}")
+                logger.warning(f"#{self.serial_number}: API stop returned unexpected code: {data.get('code')}")
         except requests.exceptions.RequestException as e:
-            logger.error(
-                f"#{self.serial_number}: Network issue while stopping browser via API: {str(e)}")
+            logger.debug(f"#{self.serial_number}: Network issue while stopping browser via API: {str(e)}")
         except Exception as e:
-            logger.exception(
-                f"#{self.serial_number}: Unexpected error during API stop: {str(e)}")
+            logger.debug(f"#{self.serial_number}: Unexpected error during API stop: {str(e)}")
 
-        # Если API не сработал, пробуем стандартное закрытие через WebDriver
-        try:
-            if self.driver:
-                logger.debug(
-                    f"#{self.serial_number}: Attempting to close browser via WebDriver.")
-                self.driver.close()
-                self.driver.quit()
-                logger.debug(
-                    f"#{self.serial_number}: Browser closed successfully via WebDriver.")
-        except WebDriverException as e:
-            logger.warning(
-                f"#{self.serial_number}: WebDriverException while closing browser: {str(e)}")
-        except Exception as e:
-            logger.exception(
-                f"#{self.serial_number}: General exception while closing browser via WebDriver: {str(e)}")
-        finally:
-            logger.debug(f"#{self.serial_number}: Resetting driver to None.")
-            self.driver = None  # Обнуляем драйвер
-
-        logger.error(
-            f"#{self.serial_number}: Browser closure process completed with errors.")
+        logger.error(f"#{self.serial_number}: Browser closure process completed with errors.")
         return False
+
+

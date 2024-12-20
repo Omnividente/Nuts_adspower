@@ -6,12 +6,15 @@ import atexit
 import sys
 import re
 import ctypes
+import requests
+import time
 
 # Инициализация colorama для Windows
 init(autoreset=True)
 
 # Глобальный stop_event для управления остановкой
 stop_event = threading.Event()
+visible = threading.Event()
 stop_event.restart_mode = False
 
 # Глобальная переменная для логгера
@@ -242,19 +245,116 @@ balances = []
 
 
 def read_accounts_from_file():
+    """
+    Reads accounts from the 'accounts.txt' file.
+    """
     try:
         with open('accounts.txt', 'r') as file:
-            accounts = [line.strip() for line in file.readlines()]
-            logger.debug(
-                f"Successfully read {len(accounts)} accounts from file.")
+            accounts = [line.strip() for line in file if line.strip()]
+            logger.debug(f"Successfully read {len(accounts)} accounts from accounts.txt.")
             return accounts
     except FileNotFoundError:
-        logger.error("accounts.txt file not found.")
+        logger.debug("The accounts.txt file was not found.")
         return []
     except Exception as e:
-        logger.exception(
-            f"Unexpected error while reading accounts file: {str(e)}")
+        logger.debug(f"An unexpected error occurred while reading accounts.txt: {e}")
         return []
+
+def parse_accounts_parameter(accounts_param):
+    """
+    Parses the accounts parameter from settings.txt.
+    """
+    accounts_set = set()
+    accounts_param = accounts_param.replace(' ', '')  # Remove spaces
+    if not accounts_param:
+        return []
+
+    parts = accounts_param.split(',')
+    for part in parts:
+        if '-' in part:
+            try:
+                start, end = part.split('-')
+                start, end = int(start), int(end)
+                accounts_set.update(range(start, end + 1))
+            except ValueError:
+                logger.debug(f"Invalid range '{part}' in the accounts parameter.")
+        else:
+            try:
+                accounts_set.add(int(part))
+            except ValueError:
+                logger.debug(f"Invalid account number '{part}' in the accounts parameter.")
+    return sorted(accounts_set)
+
+def get_all_profiles():
+    """
+    Retrieves all profiles via the AdsPower local API.
+    """
+    url = "http://localhost:50325/api/v1/user/list"
+    page = 1
+    profiles = []
+
+    while True:
+        params = {"page": page, "page_size": 100}
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            if data.get("code") != 0:
+                logger.debug(f"API error: {data.get('msg')}")
+                break
+
+            current_profiles = data["data"]["list"]
+            if not current_profiles:
+                break
+
+            profiles.extend(current_profiles)
+            page += 1
+
+            time.sleep(1)
+        except requests.RequestException as e:
+            logger.debug(f"An error occurred while accessing the API: {e}")
+            break
+
+    return profiles
+
+def get_accounts():
+    """
+    Determines the list of accounts to process.
+    """
+    settings = load_settings()
+    accounts_param = settings.get('ACCOUNTS', '').strip()
+
+    if accounts_param:
+        accounts = parse_accounts_parameter(accounts_param)
+        if accounts:
+            logger.info(f"Accounts retrieved from settings")
+            logger.debug(f"{accounts}")
+            return accounts
+        else:
+            logger.debug("The accounts parameter in settings is empty after parsing.")
+    else:
+        logger.debug("The accounts parameter is missing in settings.")
+
+    # Read from accounts.txt
+    accounts_from_file = read_accounts_from_file()
+    if accounts_from_file:
+        logger.info(f"Accounts retrieved from accounts.txt")
+        logger.debug(f"{accounts_from_file}")
+        return accounts_from_file
+
+    # Retrieve all profiles
+    profiles = get_all_profiles()
+    if profiles:
+        accounts_from_profiles = [profile['serial_number'] for profile in profiles]
+        logger.info(f"Accounts retrieved from ADS profiles")
+        logger.debug(f"{accounts_from_profiles}")
+        return accounts_from_profiles
+
+    # If nothing could be retrieved
+    logger.error("Failed to retrieve the account list from any source.")
+    return []
+
 
 
 def reset_balances():
@@ -262,6 +362,38 @@ def reset_balances():
     balances = []
     logger.debug("Balances reset successfully.")
 
+def get_max_games(settings):
+    """
+    Возвращает максимальное количество игр из настроек.
+
+    :param settings: Словарь с настройками.
+    :return: Целое число максимального количества игр или None, если значение не указано или некорректно.
+    """
+    # Приводим ключи в нижний регистр
+    settings = {k.lower(): v for k, v in settings.items()}
+    max_games = settings.get('max_games', None)
+
+    # Если значение max_games задано, проверяем его корректность
+    if max_games:
+        if max_games.isdigit():
+            if is_debug_enabled():
+                logger.debug(f"Max games set to {max_games}.")
+            return int(max_games)
+        else:
+            logger.warning(f"Invalid value for 'max_games': {max_games}. Using all available games.")
+    else:
+        if is_debug_enabled():
+            logger.debug("'max_games' not found in settings. No limit applied.")
+
+    return None  # Если max_games не задано или указано некорректно, возвращаем None
+
 
 class GlobalFlags:
     interrupted = False
+
+
+
+
+
+
+

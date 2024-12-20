@@ -2,7 +2,7 @@ import random
 import time
 from telegram_bot_automation import TelegramBotAutomation
 from update_manager import check_and_update, restart_script
-from utils import read_accounts_from_file, reset_balances, setup_logger, load_settings, is_debug_enabled, GlobalFlags, stop_event, get_color
+from utils import get_accounts, reset_balances, setup_logger, load_settings, is_debug_enabled, GlobalFlags, stop_event, get_color, visible
 from colorama import Fore, Style
 from prettytable import PrettyTable
 from datetime import datetime, timedelta
@@ -220,7 +220,7 @@ def process_account(account, balance_dict, active_timers):
                         except Exception as e:
                             retry_count += 1
                             if stop_event.is_set():
-                                logger.info(
+                                logger.debug(
                                     f"#{account}: Detected stop event during retry. Exiting.")
                                 return
                             logger.warning(
@@ -234,12 +234,13 @@ def process_account(account, balance_dict, active_timers):
                                 schedule_retry(
                                     account, next_retry_time, balance_dict, active_timers, retry_delay)
                         finally:
-                            if bot:
-                                try:
-                                    bot.browser_manager.close_browser()
-                                except Exception as e:
-                                    logger.warning(
-                                        f"#{account}: Failed to close browser: {e}")
+                            if not stop_event.is_set():
+                                if bot:
+                                    try:
+                                        bot.browser_manager.close_browser()
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"#{account}: Failed to close browser: {e}")
 
                 # Генерация и отображение таблицы только при успешной обработке
                 if success:
@@ -294,7 +295,7 @@ def navigate_and_perform_actions(bot):
 
     logger.debug("Preparing account...")
     bot.preparing_account()
-
+    
     if stop_event.is_set():
         logger.debug("Stop event detected. Aborting before performing quests.")
         return
@@ -799,7 +800,17 @@ if __name__ == "__main__":
                         help="Enable debug logging")
     parser.add_argument("--account", type=int,
                         help="Force processing a specific account")
+    parser.add_argument(
+        "--visible", type=int, choices=[0, 1], default=0, help="Set visible mode (1 for visible, 0 for headless)"
+    )
     args = parser.parse_args()
+    # Установка флага visible
+    if args.visible == 1:
+        visible.set()
+        logger.info("Visible mode enabled.")
+    else:
+        visible.clear()
+        logger.info("Headless mode enabled.")
 
     # Настройка логирования
     logger = setup_logger(debug_mode=args.debug, log_to_file=args.debug)
@@ -835,7 +846,7 @@ if __name__ == "__main__":
 
     try:
         reset_balances()
-        accounts = read_accounts_from_file()
+        accounts = get_accounts()
 
         # Синхронизация таймеров с балансами
         sync_timers_with_balance(balance_dict)
