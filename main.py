@@ -56,7 +56,7 @@ for backup_file in backup_files:
     try:
         target_path = os.path.join(temp_dir, os.path.basename(backup_file))
         shutil.move(backup_file, target_path)
-        logger.info(f"Backup file moved: {backup_file} -> {target_path}")
+        logger.debug(f"Backup file moved: {backup_file} -> {target_path}")
     except Exception as e:
         logger.error(f"Failed to move backup file {backup_file} to temp: {e}")
 # Проверка и создание файла TIMERS_FILE, если он отсутствует
