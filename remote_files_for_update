@@ -4,3 +4,4 @@ utils.py
 main.py
 remote_files_for_update
 requirements.txt
+update_manager.py

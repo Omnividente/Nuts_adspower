@@ -11,7 +11,7 @@ ACCOUNTS=
 UPDATE_INTERVAL=10800
 
 # Включение/выключение автоматических обновлений
-AUTO_UPDATE=False
+AUTO_UPDATE=true
 
 # Список файлов для проверки обновлений (через запятую)
 FILES_TO_UPDATE=remote_files_for_update
