@@ -204,11 +204,9 @@ class FileUpdater:
 
                 content = response.content  # Получаем содержимое файла
 
-                # Путь для резервной копии и обновлённого файла
-                root_dir = "/"  # Задаем корневой каталог
+                # Путь для резервной копии
                 file_name = os.path.basename(file_path)  # Извлекаем имя файла
                 backup_path = os.path.join(temp_dir, f"{file_name}.backup")
-                updated_path = os.path.join(root_dir, file_name)
 
                 # Удаляем старую резервную копию, если она существует
                 if os.path.exists(backup_path):
@@ -220,11 +218,11 @@ class FileUpdater:
                     logger.info(f"Backup created: {backup_path}", extra={
                         'color': Fore.CYAN})
 
-                # Сохраняем обновлённый файл в temp
-                with open(updated_path, "wb") as f:
+                # Сохраняем обновленный файл обратно в его изначальный путь
+                with open(file_path, "wb") as f:
                     f.write(content)
 
-                logger.info(f"File {file_name} successfully updated and saved in the temp folder.", extra={
+                logger.info(f"File {file_name} successfully updated at {file_path}.", extra={
                             'color': Fore.CYAN})
 
             except Exception as e:
@@ -234,6 +232,7 @@ class FileUpdater:
                     raise  # Немедленное прерывание, если флаг установлен
 
         return success
+
 
 
 # ========================= Основная логика ==========================
