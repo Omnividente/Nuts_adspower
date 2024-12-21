@@ -327,9 +327,7 @@ def navigate_and_perform_actions(bot):
         logger.debug("Stop event detected. Aborting after starting app.")
         return
 
-    logger.debug("Preparing account...")
-    if not bot.preparing_account():
-        raise Exception("Failed to preparing account")
+    bot.preparing_account()
 
     if stop_event.is_set():
         logger.debug("Stop event detected. Aborting before performing quests.")
