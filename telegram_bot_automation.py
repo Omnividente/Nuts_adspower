@@ -8,11 +8,11 @@ from browser_manager import BrowserManager
 from utils import setup_logger, stop_event
 from colorama import Fore, Style
 import traceback
+import logging
 
+# Настроим логирование (если не было настроено ранее)
+logger = logging.getLogger("application_logger")
 
-# Set up logging with colors
-# Настройка логирования
-logger = setup_logger()
 
 
 class TelegramBotAutomation:
