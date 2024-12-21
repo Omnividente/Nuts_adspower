@@ -13,6 +13,9 @@ import os
 import argparse
 import sys
 import signal
+import logging
+import shutil
+import glob
 
 ###################################################################################################################
 ###################################################################################################################
@@ -21,8 +24,7 @@ import signal
 settings = load_settings()
 
 # Настройка логирования
-logger = setup_logger()
-
+logger = logging.getLogger("application_logger")
 
 # Глобальные переменные
 bot = None
@@ -31,11 +33,39 @@ balance_dict = {}
 balance_lock = Lock()
 update_lock = Lock()
 task_lock = Lock()
-TIMERS_FILE = "timers.json"
 account_lock = Lock()
 active_profile_lock = Lock()
 task_queue = Queue()
+has_logged_queue_empty = False
 DEFAULT_UPDATE_INTERVAL = 3 * 60 * 60  # 3 часа по умолчанию
+temp_dir = "temp"
+TIMERS_FILE = os.path.join(temp_dir, "timers.json")  # Полный путь к файлу
+ROOT_TIMERS_FILE = "timers.json"  # Путь к файлу в корневой директории
+BACKUP_FILES_PATTERN = "*.backup"
+if not os.path.exists(temp_dir):
+    os.makedirs(temp_dir)
+    logger.debug(f"Temporary folder created: {temp_dir}")
+if os.path.exists(ROOT_TIMERS_FILE) and not os.path.exists(TIMERS_FILE):
+    try:
+        shutil.move(ROOT_TIMERS_FILE, TIMERS_FILE)
+        logger.debug(f"Timers file copied from root to temp: {TIMERS_FILE}")
+    except Exception as e:
+        logger.error(f"Failed to copy timers file to temp: {e}")
+backup_files = glob.glob(BACKUP_FILES_PATTERN)
+for backup_file in backup_files:
+    try:
+        target_path = os.path.join(temp_dir, os.path.basename(backup_file))
+        shutil.move(backup_file, target_path)
+        logger.info(f"Backup file moved: {backup_file} -> {target_path}")
+    except Exception as e:
+        logger.error(f"Failed to move backup file {backup_file} to temp: {e}")
+# Проверка и создание файла TIMERS_FILE, если он отсутствует
+if not os.path.exists(TIMERS_FILE):
+    with open(TIMERS_FILE, "w") as f:
+        json.dump({}, f)  # Создаём пустой JSON-файл
+    logger.debug(f"Timers file created: {TIMERS_FILE}")
+else:
+    logger.debug(f"Timers file already exists: {TIMERS_FILE}")
 
 
 def schedule_periodic_update_check(task_queue: Queue, interval: int = DEFAULT_UPDATE_INTERVAL):
@@ -161,6 +191,7 @@ def process_account(account, balance_dict, active_timers):
     logger.info(f"Processing account: {account}")
     retry_count = 0
     success = False
+    message_logged = False
     global bot
     # Ожидаем освобождения глобальной блокировки
     while not stop_event.is_set():
@@ -249,12 +280,15 @@ def process_account(account, balance_dict, active_timers):
 
             finally:
                 active_profile_lock.release()  # Освобождаем блокировку
+                message_logged = False
                 logger.debug(
                     f"#{account}: Completed processing for account: {account}")
             break  # Выходим из цикла ожидания
         else:
-            logger.info(
-                f"#{account}:  is waiting for the active profile to complete...")
+            if not message_logged:
+                logger.debug(
+                    f"#{account}: is waiting for the active profile to complete...")
+                message_logged = True  # Устанавливаем флаг, чтобы не дублировать сообщение
             time.sleep(1)  # Период ожидания
         if stop_event.is_set():
             logger.info(
@@ -294,8 +328,9 @@ def navigate_and_perform_actions(bot):
         return
 
     logger.debug("Preparing account...")
-    bot.preparing_account()
-    
+    if not bot.preparing_account():
+        raise Exception("Failed to preparing account")
+
     if stop_event.is_set():
         logger.debug("Stop event detected. Aborting before performing quests.")
         return
@@ -509,6 +544,7 @@ def schedule_next_run(account, next_schedule, balance_dict, active_timers):
 
 
 def task_queue_processor(task_queue, active_timers):
+    global has_logged_queue_empty
     """
     Основной обработчик задач из очереди. Выполняет задачи последовательно.
     """
@@ -526,28 +562,33 @@ def task_queue_processor(task_queue, active_timers):
 
             logger.debug(f"Fetched task: {task}")
 
-            # Обработка задач по их структуре
+            # Обработка задач
             if isinstance(task, tuple):
                 if len(task) == 2:  # check_updates
                     task_type, task_data = task
                     if task_type == "check_updates":
-                        if stop_event.is_set():
-                            logger.debug(
-                                "Stop event set. Exiting before account processing.")
-                            break
-                        logger.info("Running scheduled update check...")
-                        check_and_update(
-                            priority_task_queue=task_queue,
-                            is_task_active=lambda: not task_queue.empty()
-                        )
+                        try:
+                            logger.info("Running scheduled update check...")
+                            check_and_update(
+                                priority_task_queue=task_queue,
+                                is_task_active=lambda: not task_queue.empty()
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"Error during scheduled update check: {e}")
                 elif len(task) == 3:  # process_account
                     account, balance_dict, active_timers = task
-                    if stop_event.is_set():
+                    try:
                         logger.debug(
-                            "Stop event set. Exiting before account processing.")
-                        break
-                    logger.debug(f"Processing account {account} from queue.")
-                    process_account(account, balance_dict, active_timers)
+                            f"Processing account {account} from queue.")
+                        process_account(account, balance_dict, active_timers)
+                    except Exception as e:
+                        logger.error(
+                            f"Error during account processing for {account}: {e}")
+                        # Можно логировать статус профиля как "ERROR"
+                        update_balance_info(
+                            account, "N/A", 0.0, datetime.now(), "ERROR", balance_dict
+                        )
                 else:
                     logger.warning(f"Unknown task structure: {task}")
             else:
@@ -562,10 +603,11 @@ def task_queue_processor(task_queue, active_timers):
                 logger.debug(
                     "Stop event set during queue wait. Exiting processor...")
                 break
-            logger.debug("Queue is empty, waiting for new tasks.")
-            continue
+            if not has_logged_queue_empty:
+                logger.debug("Queue is empty, waiting for new tasks.")
+                has_logged_queue_empty = True
         except Exception as e:
-            logger.error(f"Error processing task from queue: {e}")
+            logger.error(f"Unhandled exception in task processor: {e}")
 
     logger.debug("Task queue processor stopped.")
 
@@ -793,6 +835,7 @@ def cleanup_resources(active_timers, task_queue):
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal.default_int_handler)
+
     # Настройка аргументов командной строки
     parser = argparse.ArgumentParser(
         description="Run the script with optional debug logging.")
@@ -804,6 +847,7 @@ if __name__ == "__main__":
         "--visible", type=int, choices=[0, 1], default=0, help="Set visible mode (1 for visible, 0 for headless)"
     )
     args = parser.parse_args()
+
     # Установка флага visible
     if args.visible == 1:
         visible.set()
@@ -813,7 +857,7 @@ if __name__ == "__main__":
         logger.info("Headless mode enabled.")
 
     # Настройка логирования
-    logger = setup_logger(debug_mode=args.debug, log_to_file=args.debug)
+    logger = setup_logger(debug_mode=args.debug, log_dir="./log")
 
     # Принудительный запуск аккаунта
     if args.account:
@@ -829,52 +873,31 @@ if __name__ == "__main__":
             cleanup_resources(active_timers, task_queue)
             sys.exit(0)  # Завершаем выполнение после обработки аккаунта
 
+    # Загрузка настроек и таймеров
     timers_data = load_timers()
-
-    # Загрузка интервала обновлений
     update_interval = int(settings.get(
         "UPDATE_INTERVAL", DEFAULT_UPDATE_INTERVAL))
-    # Выполняем проверку обновлений при запуске
     logger.debug("Performing initial update check...")
-    check_and_update(
-        priority_task_queue=task_queue,
-        is_task_active=lambda: not task_queue.empty()
-    )
-
-    # Запускаем периодическую проверку обновлений
+    check_and_update(priority_task_queue=task_queue,
+                     is_task_active=lambda: not task_queue.empty())
     schedule_periodic_update_check(task_queue, update_interval)
 
     try:
         reset_balances()
         accounts = get_accounts()
-
-        # Синхронизация таймеров с балансами
         sync_timers_with_balance(balance_dict)
-
-        # Вывод таблицы активных таймеров
         generate_and_display_table(timers_data, table_type="timers")
-
         logger.info("Starting account processing cycle.")
 
         # Запуск обработчика очереди задач
         task_processor_thread = Thread(
             target=task_queue_processor,
-            # Передаем task_queue и active_timers
             args=(task_queue, active_timers),
             daemon=True
         )
         task_processor_thread.start()
 
-        # Обработка аккаунтов со статусом "ERROR"
-        for account in accounts:
-            # short_account_id = f"#{account}"
-            account_data = balance_dict.get(account, {})
-            if account_data.get("status") == "ERROR":
-                logger.info(
-                    f"#{account}: has status ERROR. Adding to immediate processing.")
-                task_queue.put((account, balance_dict, active_timers))
-
-        # Обработка остальных аккаунтов
+        # Обработка аккаунтов
         for account in accounts:
             if stop_event.is_set():
                 logger.info(
@@ -882,7 +905,7 @@ if __name__ == "__main__":
                 break
 
             try:
-                # Проверяем таймеры
+                # Проверяем таймеры и планируем выполнение
                 if account in timers_data:
                     timer_info = timers_data[account]
                     next_schedule = datetime.strptime(
@@ -892,48 +915,33 @@ if __name__ == "__main__":
                             f"#{account}: Account scheduled for {next_schedule}. Skipping immediate processing.")
                         schedule_next_run(
                             account, next_schedule, balance_dict, active_timers)
-                        continue  # Пропускаем немедленный запуск
-                    else:
-                        logger.debug(
-                            f"#{account}: Timer expired for account {account}. Processing immediately.")
+                        continue
 
-                # Добавляем аккаунт в очередь задач
                 logger.debug(
                     f"#{account}: Adding account to task queue for processing.")
                 task_queue.put((account, balance_dict, active_timers))
-                logger.debug(
-                    f"Queue size after adding account {account}: {task_queue.qsize()}")
-
             except Exception as e:
-                logger.warning(
-                    f"#{account}: Error while processing account {account}: {e}")
-
-        if not GlobalFlags.interrupted:
-            logger.debug(
-                "All accounts processed. Waiting for timers to complete...")
+                logger.error(f"Error while scheduling account {account}: {e}")
 
         # Ожидание завершения таймеров
         while not stop_event.is_set() and any(timer.is_alive() for timer in active_timers):
-            time.sleep(1)  # Небольшая задержка для снижения нагрузки на CPU
+            time.sleep(1)
 
+        # Повторное ожидание цикла
         if not stop_event.is_set():
             logger.info("Restarting the cycle in 5 minutes...")
-            for _ in range(300):  # Разделяем ожидание на интервалы для проверки stop_event
-                if stop_event.is_set():
-                    break
-                time.sleep(1)
+            time.sleep(300)
 
     except KeyboardInterrupt:
         if not GlobalFlags.interrupted:
-            logger.info("KeyboardInterrupt detected.Exiting...",
+            logger.info("KeyboardInterrupt detected. Exiting...",
                         extra={'color': Fore.RED})
-        logger.debug("KeyboardInterrupt detected in main loop. Exiting...", extra={
-            'color': Fore.RED})
-        stop_event.set()  # Установка флага выхода
+        stop_event.set()
+    except Exception as e:
+        logger.error(f"Unhandled exception in main loop: {e}")
     finally:
-        # Остановка всех активных таймеров
+        # Завершаем ресурсы
         logger.debug("Waiting for task queue processor to stop...")
-        # Добавляем None в очередь для завершения task_queue_processor
         task_queue.put(None)
         task_processor_thread.join(timeout=5)
         if task_processor_thread.is_alive():
@@ -941,7 +949,8 @@ if __name__ == "__main__":
                 "Task queue processor thread did not terminate in time. Forcing shutdown.")
         cleanup_resources(active_timers, task_queue)
 
-        if getattr(stop_event, "restart_mode", False):  # Проверяем флаг перезапуска
+        # Перезапуск или завершение
+        if getattr(stop_event, "restart_mode", False):
             restart_script()
         else:
             logger.debug("Main thread exiting gracefully.")

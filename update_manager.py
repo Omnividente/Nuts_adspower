@@ -4,10 +4,11 @@ import requests
 import sys
 import time
 from threading import Lock
-from utils import setup_logger, load_settings, GlobalFlags, stop_event
+from utils import load_settings, GlobalFlags, stop_event
 from colorama import Fore, Style
+import logging
 
-logger = setup_logger()
+logger = logging.getLogger("application_logger")
 update_lock = Lock()
 
 # ========================= Классы ==========================
@@ -43,7 +44,7 @@ class GitUpdater:
             logger.debug(f"Git status output: {output}")
             return "Your branch is behind" in output
         except Exception as e:
-            logger.warning(f"Git update check failed: {e}")
+            logger.debug(f"Git update check failed: {e}")
             return False
 
     @staticmethod
@@ -52,19 +53,22 @@ class GitUpdater:
             logger.info("Updating via Git...")
             subprocess.run(["git", "pull"], stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, check=True)
-            logger.info("Update completed successfully via Git.")
+            logger.info("Update completed successfully via Git.",
+                        extra={'color': Fore.CYAN})
             return True
         except subprocess.CalledProcessError as e:
             logger.warning(f"Git pull failed due to local changes: {e}")
             try:
-                logger.info("Resetting local changes...")
+                logger.info("Resetting local changes...",
+                            extra={'color': Fore.CYAN})
                 subprocess.run(["git", "reset", "--hard"],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-                logger.info("Retrying git pull after resetting changes...")
+                logger.info("Retrying git pull after resetting changes...", extra={
+                            'color': Fore.CYAN})
                 subprocess.run(["git", "pull"], stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, check=True)
                 logger.info(
-                    "Update completed successfully after resetting local changes.")
+                    "Update completed successfully after resetting local changes.", extra={'color': Fore.CYAN})
                 return True
             except subprocess.CalledProcessError as reset_error:
                 logger.error(
@@ -160,47 +164,65 @@ class FileUpdater:
     @staticmethod
     def perform_update(update_files, repo_url, stop_on_failure=True):
         """
-        Обновляет файлы через URL и создаёт резервные копии.
-        Возвращает True при успешном обновлении всех файлов, иначе False.
+        Updates files via URL and creates backups in the temp folder.
+        Returns True if all files were successfully updated, otherwise False.
         """
+        logger = logging.getLogger("application_logger")
         logger.info("Updating files directly via raw URLs...")
+
+        # Удаляем расширение .git из URL, если оно присутствует
         if repo_url.endswith(".git"):
             repo_url = repo_url[:-4]
 
         branch = "main"  # Укажите ветку
-        success = True   # Флаг успешности
+        success = True   # Флаг успешности обновления
+        temp_dir = "temp"  # Директория для временных файлов
 
+        # Создаём папку temp, если она не существует
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir)
+            logger.debug(f"Temporary folder created: {temp_dir}")
+
+        # Обновляем каждый файл из списка
         for file_path in update_files:
             try:
-                logger.info(f"Updating file: {file_path}")
+                logger.info(f"Updating file: {file_path}", extra={
+                            'color': Fore.CYAN})
 
-                # Добавление уникального параметра для обхода кэша
+                # Добавляем уникальный параметр для обхода кэша
                 timestamp = int(time.time())
                 raw_url = (
                     f"https://raw.githubusercontent.com/"
                     f"{repo_url.split('/')[-2]}/{repo_url.split('/')[-1]}/{branch}/{file_path}?nocache={timestamp}"
                 )
 
-                # Установка заголовка Cache-Control для запросов
+                # Настраиваем заголовки Cache-Control для запроса
                 headers = {"Cache-Control": "no-cache"}
                 response = requests.get(raw_url, headers=headers, timeout=10)
-                response.raise_for_status()
+                response.raise_for_status()  # Проверяем, что запрос прошёл успешно
 
-                content = response.content
+                content = response.content  # Получаем содержимое файла
 
-                # Создание резервной копии
-                backup_path = f"{file_path}.backup"
+                # Путь для резервной копии и обновлённого файла
+                file_name = os.path.basename(file_path)  # Извлекаем имя файла
+                backup_path = os.path.join(temp_dir, f"{file_name}.backup")
+                updated_path = os.path.join(temp_dir, file_name)
+
+                # Удаляем старую резервную копию, если она существует
                 if os.path.exists(backup_path):
                     os.remove(backup_path)
 
+                # Создаём резервную копию текущего файла
                 if os.path.exists(file_path):
                     os.rename(file_path, backup_path)
+                    logger.info(f"Backup created: {backup_path}")
 
-                # Запись файла
-                with open(file_path, "wb") as f:
+                # Сохраняем обновлённый файл в temp
+                with open(updated_path, "wb") as f:
                     f.write(content)
 
-                logger.info(f"File {file_path} updated successfully.")
+                logger.info(f"File {file_name} successfully updated and saved in the temp folder.", extra={
+                            'color': Fore.CYAN})
 
             except Exception as e:
                 logger.error(f"Error updating file {file_path}: {e}")
@@ -248,8 +270,9 @@ def check_and_update(priority_task_queue, is_task_active):
     auto_update_enabled = settings.get("AUTO_UPDATE", "true").lower() == "true"
 
     try:
-        if GitUpdater.is_git_installed() and GitUpdater.check_updates():
-            logger.info("Git updates found. Performing update...")
+        if GitUpdater.is_git_installed() and GitUpdater.check_updates() and auto_update_enabled:
+            logger.info("Git updates found. Performing update...",
+                        extra={'color': Fore.CYAN})
             if GitUpdater.perform_update():
                 logger.debug(
                     "Update successful. Stopping processes for restart...")
@@ -259,7 +282,8 @@ def check_and_update(priority_task_queue, is_task_active):
             updates_available, update_files = FileUpdater.check_updates()
             if updates_available:
                 if auto_update_enabled:
-                    logger.info("File updates found. Performing update...")
+                    logger.info("File updates found. Performing update...", extra={
+                                'color': Fore.CYAN})
                     if FileUpdater.perform_update(
                         update_files, settings.get("REPOSITORY_URL")
                     ):
