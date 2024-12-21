@@ -204,9 +204,10 @@ class FileUpdater:
                 content = response.content  # Получаем содержимое файла
 
                 # Путь для резервной копии и обновлённого файла
+                root_dir = "/"  # Задаем корневой каталог
                 file_name = os.path.basename(file_path)  # Извлекаем имя файла
                 backup_path = os.path.join(temp_dir, f"{file_name}.backup")
-                updated_path = os.path.join(temp_dir, file_name)
+                updated_path = os.path.join(root_dir, file_name)
 
                 # Удаляем старую резервную копию, если она существует
                 if os.path.exists(backup_path):
