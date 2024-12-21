@@ -168,7 +168,8 @@ class FileUpdater:
         Returns True if all files were successfully updated, otherwise False.
         """
         logger = logging.getLogger("application_logger")
-        logger.info("Updating files directly via raw URLs...")
+        logger.info("Updating files directly via raw URLs...", extra={
+            'color': Fore.CYAN})
 
         # Удаляем расширение .git из URL, если оно присутствует
         if repo_url.endswith(".git"):
@@ -216,7 +217,8 @@ class FileUpdater:
                 # Создаём резервную копию текущего файла
                 if os.path.exists(file_path):
                     os.rename(file_path, backup_path)
-                    logger.info(f"Backup created: {backup_path}")
+                    logger.info(f"Backup created: {backup_path}", extra={
+                        'color': Fore.CYAN})
 
                 # Сохраняем обновлённый файл в temp
                 with open(updated_path, "wb") as f:
