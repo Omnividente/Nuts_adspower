@@ -1,5 +1,6 @@
 import logging
 from colorama import Fore, Style, init
+from logging.handlers import RotatingFileHandler
 import os
 import threading
 import atexit
@@ -8,6 +9,7 @@ import re
 import ctypes
 import requests
 import time
+import glob
 
 # Инициализация colorama для Windows
 init(autoreset=True)
@@ -146,21 +148,60 @@ class CustomFormatter(logging.Formatter):
 
 
 # Настройка логгера
-def setup_logger(debug_mode=False, log_to_file=False):
+def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, backup_count=1, log_dir="."):
     """
-    Настройка логирования с опциональной записью в файл.
-    :param debug_mode: Включение режима DEBUG.
-    :param log_to_file: Если True, логи записываются в файл в режиме DEBUG.
+    Настройка логирования с разными уровнями для консоли и файла, с ротацией логов.
+    :param debug_mode: Если True, в консоль выводятся DEBUG сообщения.
+    :param log_to_file: Если True, логи записываются в файл.
+    :param log_file_size: Максимальный размер файла логов (в байтах).
+    :param backup_count: Количество резервных копий файла логов.
     """
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
+    logger = logging.getLogger(
+        "application_logger")  # Используем фиксированное имя логгера
+    # Устанавливаем самый высокий уровень для логгера
+    logger.setLevel(logging.DEBUG)
 
-    # Закрываем старые обработчики
+    # Создаём временный обработчик для логирования на этапе удаления файлов
+    temp_handler = logging.StreamHandler()
+    temp_handler.setFormatter(CustomFormatter(
+        "%(asctime)s - %(levelname)s - %(message)s"))
+    temp_handler.setLevel(logging.DEBUG if debug_mode else logging.INFO)
+    logger.addHandler(temp_handler)
+
+    # Удаляем старые обработчики (если есть)
     for handler in logger.handlers[:]:
         handler.close()
         logger.removeHandler(handler)
 
+    # Создаём директорию для логов, если она не существует
+    if log_to_file:
+        if not os.path.exists(log_dir):
+            try:
+                os.makedirs(log_dir)
+                logger.debug(f"Log directory created: {log_dir}")
+            except Exception as e:
+                logger.error(
+                    f"Failed to create log directory: {log_dir}. Error: {e}")
+                raise
+
+    # Удаляем старые файлы логов
+    if log_to_file:
+        log_pattern = os.path.join(log_dir, "debug.log*")
+        for log_file in glob.glob(log_pattern):
+            try:
+                os.remove(log_file)
+                logger.debug(f"Log file deleted: {log_file}")
+            except PermissionError:
+                logger.debug(
+                    f"Failed to delete log file {log_file}: file is locked.")
+            except Exception as e:
+                logger.error(f"Error deleting log file {log_file}: {e}")
+
+    # Удаляем временный обработчик после завершения инициализации
+    logger.removeHandler(temp_handler)
+
     # Проверка поддержки ANSI
+    # Функция для проверки поддержки ANSI (оставлена без изменений)
     ansi_supported = supports_ansi()
 
     # Форматтеры
@@ -180,20 +221,23 @@ def setup_logger(debug_mode=False, log_to_file=False):
         console_handler.setFormatter(logging.Formatter(
             "%(asctime)s - %(levelname)s - %(message)s"))
 
+    # Уровень логирования для консоли
+    console_handler.setLevel(logging.DEBUG if debug_mode else logging.INFO)
     logger.addHandler(console_handler)
 
-    # Обработчик для файла без ANSI-кодов
-    if debug_mode and log_to_file:
-        log_file = "debug.log"
+    # Обработчик для файла с ротацией
+    if log_to_file:
+        log_file = os.path.join(log_dir, "debug.log")
         try:
-            if os.path.exists(log_file):
-                os.remove(log_file)
-            file_handler = logging.FileHandler(log_file, mode='w')
+            file_handler = RotatingFileHandler(
+                log_file, mode='a', maxBytes=log_file_size, backupCount=backup_count, encoding="utf-8"
+            )
             file_handler.setFormatter(file_formatter)
+            file_handler.setLevel(logging.DEBUG)
             logger.addHandler(file_handler)
         except PermissionError:
             logger.warning(
-                "Failed to remove or create log file due to file lock.")
+                "Failed to create log file due to permission issues.")
 
     atexit.register(logging.shutdown)
     return logger
@@ -251,14 +295,17 @@ def read_accounts_from_file():
     try:
         with open('accounts.txt', 'r') as file:
             accounts = [line.strip() for line in file if line.strip()]
-            logger.debug(f"Successfully read {len(accounts)} accounts from accounts.txt.")
+            logger.debug(
+                f"Successfully read {len(accounts)} accounts from accounts.txt.")
             return accounts
     except FileNotFoundError:
         logger.debug("The accounts.txt file was not found.")
         return []
     except Exception as e:
-        logger.debug(f"An unexpected error occurred while reading accounts.txt: {e}")
+        logger.debug(
+            f"An unexpected error occurred while reading accounts.txt: {e}")
         return []
+
 
 def parse_accounts_parameter(accounts_param):
     """
@@ -277,13 +324,16 @@ def parse_accounts_parameter(accounts_param):
                 start, end = int(start), int(end)
                 accounts_set.update(range(start, end + 1))
             except ValueError:
-                logger.debug(f"Invalid range '{part}' in the accounts parameter.")
+                logger.debug(
+                    f"Invalid range '{part}' in the accounts parameter.")
         else:
             try:
                 accounts_set.add(int(part))
             except ValueError:
-                logger.debug(f"Invalid account number '{part}' in the accounts parameter.")
+                logger.debug(
+                    f"Invalid account number '{part}' in the accounts parameter.")
     return sorted(accounts_set)
+
 
 def get_all_profiles():
     """
@@ -318,6 +368,7 @@ def get_all_profiles():
 
     return profiles
 
+
 def get_accounts():
     """
     Determines the list of accounts to process.
@@ -332,7 +383,8 @@ def get_accounts():
             logger.debug(f"{accounts}")
             return accounts
         else:
-            logger.debug("The accounts parameter in settings is empty after parsing.")
+            logger.debug(
+                "The accounts parameter in settings is empty after parsing.")
     else:
         logger.debug("The accounts parameter is missing in settings.")
 
@@ -346,7 +398,8 @@ def get_accounts():
     # Retrieve all profiles
     profiles = get_all_profiles()
     if profiles:
-        accounts_from_profiles = [profile['serial_number'] for profile in profiles]
+        accounts_from_profiles = [profile['serial_number']
+                                  for profile in profiles]
         logger.info(f"Accounts retrieved from ADS profiles")
         logger.debug(f"{accounts_from_profiles}")
         return accounts_from_profiles
@@ -356,11 +409,11 @@ def get_accounts():
     return []
 
 
-
 def reset_balances():
     global balances
     balances = []
     logger.debug("Balances reset successfully.")
+
 
 def get_max_games(settings):
     """
@@ -380,20 +433,15 @@ def get_max_games(settings):
                 logger.debug(f"Max games set to {max_games}.")
             return int(max_games)
         else:
-            logger.warning(f"Invalid value for 'max_games': {max_games}. Using all available games.")
+            logger.warning(
+                f"Invalid value for 'max_games': {max_games}. Using all available games.")
     else:
         if is_debug_enabled():
-            logger.debug("'max_games' not found in settings. No limit applied.")
+            logger.debug(
+                "'max_games' not found in settings. No limit applied.")
 
     return None  # Если max_games не задано или указано некорректно, возвращаем None
 
 
 class GlobalFlags:
     interrupted = False
-
-
-
-
-
-
-
