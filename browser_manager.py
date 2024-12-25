@@ -144,16 +144,16 @@ class BrowserManager:
 
                     # Настройка ChromeOptions
                     chrome_options = Options()
+                    chrome_options.add_argument("--disable-notifications")
+                    chrome_options.add_argument("--disable-popup-blocking")
+                    chrome_options.add_argument("--disable-geolocation")
+                    chrome_options.add_argument("--disable-translate")
+                    chrome_options.add_argument("--disable-infobars")
                     chrome_options.add_argument(
-                        "--disable-notifications=false")
+                        "--disable-blink-features=AutomationControlled")
+                    chrome_options.add_argument("--no-sandbox")
                     chrome_options.add_argument(
-                        "--disable-popup-blocking=false")
-                    chrome_options.add_argument("--disable-geolocation=false")
-                    chrome_options.add_argument("--disable-translate=false")
-                    chrome_options.add_argument("--disable-infobars=false")
-                    chrome_options.add_argument(
-                        "--disable-blink-features=AutomationControlled=false")
-                    chrome_options.add_argument("--no-sandbox=false")
+                        "--disable-background-timer-throttling")
                     chrome_options.add_experimental_option(
                         "debuggerAddress", selenium_address)
 

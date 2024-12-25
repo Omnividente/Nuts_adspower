@@ -1,7 +1,7 @@
 import random
 import time
 from telegram_bot_automation import TelegramBotAutomation
-from update_manager import check_and_update, restart_script
+from update_manager import check_and_update, restart_script, ignore_files_in_git
 from utils import get_accounts, reset_balances, setup_logger, load_settings, is_debug_enabled, GlobalFlags, stop_event, get_color, visible
 from colorama import Fore, Style
 from prettytable import PrettyTable
@@ -856,7 +856,11 @@ if __name__ == "__main__":
 
     # Настройка логирования
     logger = setup_logger(debug_mode=args.debug, log_dir="./log")
-
+    
+    # Отключение отслеживания в github 
+    files_to_ignore = ["settings.txt", "accounts.txt"]
+    ignore_files_in_git(files_to_ignore)
+    
     # Принудительный запуск аккаунта
     if args.account:
         account = args.account
