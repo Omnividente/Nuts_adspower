@@ -234,7 +234,6 @@ class FileUpdater:
         return success
 
 
-
 # ========================= Основная логика ==========================
 
 
@@ -263,6 +262,21 @@ def restart_script():
             logger.info("Exiting current process.")
         sys.exit(0)
 
+def ignore_files_in_git(file_paths):
+    """
+    Отключает отслеживание изменений для нескольких файлов в Git (локально).
+    :param file_paths: Список путей к файлам, которые нужно игнорировать.
+    """
+    for file_path in file_paths:
+        try:
+            subprocess.run(
+                ["git", "update-index", "--assume-unchanged", file_path],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except Exception:
+            pass
 
 def check_and_update(priority_task_queue, is_task_active):
     """

@@ -773,7 +773,7 @@ class TelegramBotAutomation:
                 f"#{self.serial_number}: Attempting to retrieve username.")
 
             # Ожидание появления элемента с именем пользователя
-            username_block = WebDriverWait(self.driver, 10).until(
+            username_block = WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located((By.XPATH, "//header/button/p"))
             )
 
@@ -820,7 +820,7 @@ class TelegramBotAutomation:
                     f"#{self.serial_number}: Attempting to retrieve balance (attempt {retries + 1}).")
 
                 # Ожидание контейнера с балансом
-                parent_block = WebDriverWait(self.driver, 10).until(
+                parent_block = WebDriverWait(self.driver, 30).until(
                     EC.presence_of_element_located(
                         (By.XPATH, "//div[contains(@class, 'flex items-center font-tt-hoves')]"))
                 )
@@ -1047,7 +1047,7 @@ class TelegramBotAutomation:
                     logger.debug(
                         f"#{self.serial_number}: Attempting action: {success_msg}")
 
-                    button = self.wait_for_element(By.XPATH, xpath, timeout=10)
+                    button = self.wait_for_element(By.XPATH, xpath, timeout=30)
                     if stop_event.is_set():  # Повторная проверка после потенциально долгого ожидания
                         logger.info(
                             f"#{self.serial_number}: Stop event detected after wait. Exiting...")
