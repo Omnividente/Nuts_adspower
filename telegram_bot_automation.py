@@ -5,14 +5,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, WebDriverException, TimeoutException, StaleElementReferenceException
 from browser_manager import BrowserManager
-from utils import setup_logger, stop_event
+from rapidfuzz import fuzz
+from utils import stop_event
 from colorama import Fore, Style
 import traceback
 import logging
 
 # Настроим логирование (если не было настроено ранее)
 logger = logging.getLogger("application_logger")
-
 
 
 class TelegramBotAutomation:
@@ -85,7 +85,7 @@ class TelegramBotAutomation:
                         f"#{self.serial_number}: Searching for quest buttons.")
                     # Находим кнопки квестов с наградами
                     quest_buttons = self.driver.find_elements(
-                        By.CSS_SELECTOR, "button.relative.flex.h-\\[74px\\].w-\\[74px\\]"
+                        By.CSS_SELECTOR, "button.relative"
                     )
                     if stop_event.is_set():  # Проверка после долгой операции
                         break
@@ -225,11 +225,11 @@ class TelegramBotAutomation:
                     logger.debug(
                         f"#{self.serial_number}: Right-side element not found. Retrying.")
                     retries += 1
-                    time.sleep(1)
+                    stop_event.wait(1)
                     continue
 
                 # Проверяем снова, закрыто ли окно после клика
-                time.sleep(1)  # Небольшая пауза для обновления состояния
+                stop_event.wait(1)  # Небольшая пауза для обновления состояния
                 updated_quest_window = self.driver.find_elements(
                     By.XPATH, "//div[contains(@style, 'position: absolute; height: inherit; width: inherit;')]")
                 if not updated_quest_window:
@@ -237,7 +237,7 @@ class TelegramBotAutomation:
                     return True
 
                 retries += 1
-                time.sleep(1)  # Пауза перед следующей попыткой
+                stop_event.wait(1)  # Пауза перед следующей попыткой
 
             # Если после 10 попыток окно не закрылось
             logger.warning(
@@ -291,58 +291,47 @@ class TelegramBotAutomation:
         """
         Очищает кэш браузера, загружает Telegram Web и закрывает лишние окна.
         """
-        logger.debug(
-            f"#{self.serial_number}: Starting navigation to Telegram web.")
+        logger.debug(f"#{self.serial_number}: Starting navigation to Telegram web.")
+        
+        # Очистка кэша с проверкой stop_event
         self.clear_browser_cache_and_reload()
-
-        if stop_event.is_set():  # Проверка перед выполнением долгих операций
+        if stop_event.is_set():
             return False
 
         retries = 0
-        while retries < self.MAX_RETRIES and not stop_event.is_set():
+        while retries < self.MAX_RETRIES:
+            if stop_event.is_set():
+                return False
+            
             try:
-                logger.debug(
-                    f"#{self.serial_number}: Attempting to load Telegram web (attempt {retries + 1}).")
+                logger.debug(f"#{self.serial_number}: Attempting to load Telegram web (attempt {retries + 1}).")
                 self.driver.get('https://web.telegram.org/k/')
-
-                if stop_event.is_set():  # Проверка после загрузки страницы
+                if stop_event.is_set():
                     return False
 
-                logger.debug(
-                    f"#{self.serial_number}: Telegram web loaded successfully.")
-                logger.debug(f"#{self.serial_number}: Closing extra windows.")
+                logger.debug(f"#{self.serial_number}: Telegram web loaded successfully.")
                 self.close_extra_windows()
-
-                # Эмуляция ожидания с проверкой stop_event
-                sleep_time = random.randint(5, 7)
-                logger.debug(
-                    f"#{self.serial_number}: Sleeping for {sleep_time} seconds.")
-                for _ in range(sleep_time):
-                    if stop_event.is_set():
-                        logger.debug(
-                            f"#{self.serial_number}: Stopping sleep due to stop_event.")
+                
+                # Упрощённое ожидание с проверкой stop_event
+                for _ in range(random.randint(5, 7)):
+                    if stop_event.wait(1):  # Ждём с прерыванием
+                        logger.debug(f"#{self.serial_number}: Stopping wait due to stop_event.")
                         return False
-                    time.sleep(1)  # Короткий sleep для проверки stop_event
 
                 return True
 
             except (WebDriverException, TimeoutException) as e:
-                error_message = str(e).splitlines()[0]
-                logger.warning(
-                    f"#{self.serial_number}: Exception in navigating to Telegram bot (attempt {retries + 1}): {error_message}")
+                logger.debug(f"#{self.serial_number}: Exception in navigating to Telegram bot (attempt {retries + 1}): {e}")
                 retries += 1
+                
+                # Ожидание перед повторной попыткой
+                if stop_event.wait(5):  # Ждём 5 секунд с прерыванием
+                    logger.debug(f"#{self.serial_number}: Stopping retry due to stop_event.")
+                    return False
 
-                # Проверка во время ожидания перед повторной попыткой
-                for _ in range(5):
-                    if stop_event.is_set():
-                        logger.debug(
-                            f"#{self.serial_number}: Stopping retry sleep due to stop_event.")
-                        return False
-                    time.sleep(1)
-
-        logger.error(
-            f"#{self.serial_number}: Failed to navigate to Telegram web after {self.MAX_RETRIES} attempts.")
+        logger.debug(f"#{self.serial_number}: Failed to navigate to Telegram web after {self.MAX_RETRIES} attempts.")
         return False
+
 
     def close_extra_windows(self):
         """
@@ -406,7 +395,7 @@ class TelegramBotAutomation:
                     logger.warning(
                         f"#{self.serial_number}: Chat input area not found.")
                     retries += 1
-                    time.sleep(5)
+                    stop_event.wait(5)
                     continue
 
                 # Находим область поиска
@@ -422,14 +411,14 @@ class TelegramBotAutomation:
                     logger.warning(
                         f"#{self.serial_number}: Search area not found.")
                     retries += 1
-                    time.sleep(5)
+                    stop_event.wait(5)
                     continue
 
                 # Добавляем задержку перед завершением
                 sleep_time = random.randint(5, 7)
                 logger.debug(
                     f"{Fore.LIGHTBLACK_EX}Sleeping for {sleep_time} seconds.{Style.RESET_ALL}")
-                time.sleep(sleep_time)
+                stop_event.wait(sleep_time)
                 logger.debug(
                     f"#{self.serial_number}: Message successfully sent to the group.")
                 return True
@@ -438,7 +427,7 @@ class TelegramBotAutomation:
                 logger.warning(
                     f"#{self.serial_number}: Failed to perform action (attempt {retries + 1}): {error_message}")
                 retries += 1
-                time.sleep(5)
+                stop_event.wait(5)
             except Exception as e:
                 logger.error(f"#{self.serial_number}: Unexpected error: {e}")
                 break
@@ -505,13 +494,13 @@ class TelegramBotAutomation:
                     self.driver.execute_script(
                         "arguments[0].scrollIntoView({ behavior: 'smooth', block: 'center' });", link)
                     # Небольшая задержка для завершения скроллинга
-                    time.sleep(1)
+                    stop_event.wait(1)
 
                     # Клик по ссылке
                     link.click()
                     logger.debug(
                         f"#{self.serial_number}: Link clicked successfully.")
-                    time.sleep(2)
+                    stop_event.wait(2)
 
                 # Поиск и клик по кнопке запуска
                 launch_button = self.wait_for_element(
@@ -532,7 +521,7 @@ class TelegramBotAutomation:
                     sleep_time = random.randint(3, 5)
                     logger.debug(
                         f"#{self.serial_number}: Sleeping for {sleep_time} seconds before switching to iframe.")
-                    time.sleep(sleep_time)
+                    stop_event.wait(sleep_time)
 
                     # Переключение на iframe
                     self.switch_to_iframe()
@@ -548,7 +537,7 @@ class TelegramBotAutomation:
                 logger.warning(
                     f"#{self.serial_number}: Failed to click link or interact with elements (attempt {retries + 1}): {str(e).splitlines()[0]}")
                 retries += 1
-                time.sleep(5)
+                stop_event.wait(5)
             except Exception as e:
                 logger.error(
                     f"#{self.serial_number}: Unexpected error during click_link: {str(e).splitlines()[0]}")
@@ -557,7 +546,17 @@ class TelegramBotAutomation:
         logger.error(
             f"#{self.serial_number}: All attempts to click link failed after {self.MAX_RETRIES} retries.")
         return False
+    def wait_for_page_load(self, timeout=30):
+        """
+        Ожидание полной загрузки страницы с помощью проверки document.readyState.
 
+        :param driver: WebDriver Selenium.
+        :param timeout: Максимальное время ожидания.
+        """
+        WebDriverWait(self.driver, timeout).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        
     def wait_for_element(self, by, value, timeout=10):
         """
         Ожидает, пока элемент станет кликабельным, в течение указанного времени.
@@ -569,25 +568,39 @@ class TelegramBotAutomation:
         """
         try:
             logger.debug(
-                f"#{self.serial_number}: Waiting for element by {by} with value '{value}' for up to {timeout} seconds.")
-            element = WebDriverWait(self.driver, timeout).until(
-                EC.element_to_be_clickable((by, value))
+                f"#{self.serial_number}: Waiting for element by {by} with value '{value}' for up to {timeout} seconds."
             )
+            
+            # Ожидание с проверкой stop_event
+            for _ in range(timeout):
+                if stop_event.is_set():
+                    logger.debug(f"#{self.serial_number}: Stop event detected during wait for element.")
+                    return None
+
+                try:
+                    element = WebDriverWait(self.driver, 1).until(
+                        EC.element_to_be_clickable((by, value))
+                    )
+                    logger.debug(f"#{self.serial_number}: Element found and clickable: {value}")
+                    return element
+                except TimeoutException:
+                    continue  # Продолжаем цикл, если элемент пока не найден
+
             logger.debug(
-                f"#{self.serial_number}: Element found and clickable: {value}")
-            return element
-        except TimeoutException:
-            logger.debug(
-                f"#{self.serial_number}: Element not found or not clickable within {timeout} seconds: {value}")
+                f"#{self.serial_number}: Element not found or not clickable within {timeout} seconds: {value}"
+            )
             return None
         except (WebDriverException, StaleElementReferenceException) as e:
             logger.debug(
-                f"#{self.serial_number}: Error while waiting for element {value}: {str(e).splitlines()[0]}")
+                f"#{self.serial_number}: Error while waiting for element {value}: {str(e).splitlines()[0]}"
+            )
             return None
         except Exception as e:
             logger.error(
-                f"#{self.serial_number}: Unexpected error while waiting for element: {str(e)}")
+                f"#{self.serial_number}: Unexpected error while waiting for element: {str(e)}"
+            )
             return None
+
 
     def clear_browser_cache_and_reload(self):
         """
@@ -659,7 +672,7 @@ class TelegramBotAutomation:
                             logger.info(
                                 f"#{self.serial_number}: Stop event detected during sleep. Exiting preparing_account.")
                             return
-                        time.sleep(1)
+                        stop_event.wait(1)
 
                     break  # Успешное завершение действия
 
@@ -676,7 +689,7 @@ class TelegramBotAutomation:
                             logger.info(
                                 f"#{self.serial_number}: Stop event detected during retry wait. Exiting preparing_account.")
                             return
-                        time.sleep(1)
+                        stop_event.wait(1)
 
                     if retries >= self.MAX_RETRIES:
                         logger.debug(
@@ -687,42 +700,52 @@ class TelegramBotAutomation:
                         f"#{self.serial_number}: Unexpected error during action '{success_msg}': {str(e)}")
                     break
             logger.debug(
-                f"#{self.serial_number}: Finished processing action: {success_msg}")
+                f"#{self.serial_number}: Finished processing action: {success_msg}")  
             
-            retries = 0
-            while retries < self.MAX_RETRIES:
-                if stop_event.is_set():
-                    logger.info(
-                        f"#{self.serial_number}: Stop event detected. Exiting preparing_account.")
-                    return
 
-                try:
-                    button = WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable(
-                            (By.CSS_SELECTOR, 'a[href="/home"]'))
-                    )
-                    button.click()
-                    logger.info(
-                        f"#{self.serial_number}: Successfully clicked on the Home tab.")
-                    return  # Выходим из функции после успешного клика
+    def click_home_tab(self):
+        """
+        Функция для клика на вкладку "Home" с обработкой исключений и остановкой по событию.
 
-                except TimeoutException:
-                    logger.debug(
-                        f"#{self.serial_number}: Home tab not found within timeout.")
-                    break
+        :param driver: WebDriver Selenium.
+        :param stop_event: Событие threading.Event для остановки выполнения.
+        :param serial_number: Уникальный идентификатор для логирования.
+        :param max_retries: Максимальное количество попыток клика.
+        :return: None
+        """        
+        retries = 0
 
-                except WebDriverException as e:
-                    logger.debug(
-                        f"#{self.serial_number}: Failed to click Home tab (attempt {retries + 1}): {str(e).splitlines()[0]}")
-                    retries += 1
-                    for _ in range(5):  # Проверяем stop_event во время паузы
-                        if stop_event.is_set():
-                            logger.info(
-                                f"#{self.serial_number}: Stop event detected during retry. Exiting preparing_account.")
-                            return
-                        time.sleep(1)
+        while retries < self.MAX_RETRIES:
+            if stop_event.is_set():
+                logger.debug(f"#{self.serial_number}: Stop event detected. Exiting click_home_tab.")
+                return False
 
+            try:
+                button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'a[href="/home"]'))
+                )
+                button.click()
+                logger.info(f"#{self.serial_number}: Successfully clicked on the Home tab.")
+                # Ждем полной загрузки страницы
+                self.wait_for_page_load()
+                return True  # Успешно выполнено, выходим из функции
 
+            except TimeoutException:
+                logger.debug(f"#{self.serial_number}: Home tab not found within timeout.")
+                break
+
+            except WebDriverException as e:
+                logger.debug(f"#{self.serial_number}: Failed to click Home tab (attempt {retries + 1}): {str(e).splitlines()[0]}")
+                retries += 1
+                for _ in range(5):  # Проверяем stop_event во время паузы
+                    if stop_event.is_set():
+                        logger.info(f"#{self.serial_number}: Stop event detected during retry. Exiting click_home_tab.")
+                        return False
+                    stop_event.wait(1)
+
+        logger.error(f"#{self.serial_number}: Exceeded maximum retries to click Home tab.")
+        return False
+    
     def switch_to_iframe(self):
         """
         Switches to the first iframe on the page, if available.
@@ -884,7 +907,7 @@ class TelegramBotAutomation:
                     f"#{self.serial_number}: Failed to retrieve balance or username (attempt {retries + 1}): {str(e).splitlines()[0]}"
                 )
                 retries += 1
-                time.sleep(5)
+                stop_event.wait(5)
 
                 if stop_event.is_set():  # Проверка во время ожидания перед новой попыткой
                     logger.info(
@@ -896,7 +919,7 @@ class TelegramBotAutomation:
                 logger.warning(
                     f"#{self.serial_number}: Exception occurred while retrieving balance: {error_message}")
                 retries += 1
-                time.sleep(5)
+                stop_event.wait(5)
 
                 if stop_event.is_set():
                     logger.info(
@@ -947,8 +970,14 @@ class TelegramBotAutomation:
                         continue
 
                 if not parent_element:
-                    raise NoSuchElementException(
-                        "No element with text 'Осталось' or 'Get after' found.")
+                    if retries == self.MAX_RETRIES - 1:  # Логируем только на последней попытке
+                        logger.debug(
+                            f"#{self.serial_number}: No element with text 'Осталось' or 'Get after' found after {self.MAX_RETRIES} attempts.")
+                        logger.warning(
+                            f"#{self.serial_number}: No 'Time' element found after {self.MAX_RETRIES} attempts.")
+                    retries += 1
+                    stop_event.wait(5)
+                    continue
 
                 # Логируем найденный контейнер
                 logger.debug(
@@ -1000,12 +1029,12 @@ class TelegramBotAutomation:
                     return "N/A"
 
                 self.farming()  # Вызываем farming при ошибке
-                time.sleep(5)
+                stop_event.wait(5)
             except StaleElementReferenceException:
                 retries += 1
                 logger.warning(
                     f"#{self.serial_number}: Encountered stale element reference (attempt {retries}). Retrying...")
-                time.sleep(2)  # Пауза перед повторным поиском элементов
+                stop_event.wait(2)  # Пауза перед повторным поиском элементов
             except Exception as e:
                 logger.error(
                     f"#{self.serial_number}: Unexpected error during time extraction: {str(e)}")
@@ -1024,7 +1053,10 @@ class TelegramBotAutomation:
             f"#{self.serial_number}: Could not retrieve time after {self.MAX_RETRIES} attempts.")
         return "N/A"
 
+
     def farming(self):
+        # Ждем полной загрузки страницы
+        self.wait_for_page_load()
         """
         Выполняет действия 'Start farming' и 'Collect'
         """
@@ -1047,7 +1079,7 @@ class TelegramBotAutomation:
                     logger.debug(
                         f"#{self.serial_number}: Attempting action: {success_msg}")
 
-                    button = self.wait_for_element(By.XPATH, xpath, timeout=30)
+                    button = self.wait_for_element(By.XPATH, xpath, timeout=10)
                     if stop_event.is_set():  # Повторная проверка после потенциально долгого ожидания
                         logger.info(
                             f"#{self.serial_number}: Stop event detected after wait. Exiting...")
@@ -1066,7 +1098,7 @@ class TelegramBotAutomation:
                                 logger.info(
                                     f"#{self.serial_number}: Stop event detected during sleep. Exiting...")
                                 return
-                            time.sleep(1)
+                            stop_event.wait(1)
 
                         break
                     else:
@@ -1084,4 +1116,312 @@ class TelegramBotAutomation:
                             logger.info(
                                 f"#{self.serial_number}: Stop event detected during retry sleep. Exiting...")
                             return
-                        time.sleep(1)
+                        stop_event.wait(1)
+
+    def find_button_by_text(self, text, threshold=70):
+        """
+        Finds a button by its text with partial matching.
+        """
+        try:
+            buttons = self.driver.find_elements(By.TAG_NAME, "button")
+            logger.debug(f"#{self.serial_number}: Found {len(buttons)} buttons on the page.")
+            best_match = None
+            best_score = 0
+
+            for button in buttons:
+                button_text = button.text.strip()
+                score = fuzz.partial_ratio(button_text.lower(), text.lower())
+                if score > best_score:
+                    best_score = score
+                    best_match = button
+
+                # Exact match (shortcut for performance)
+                if score == 100:
+                    logger.debug(f"#{self.serial_number}: Exact match found for button text '{text}'.")
+                    return button
+
+            if best_score >= threshold:
+                logger.debug(
+                    f"#{self.serial_number}: Best match for text '{text}' is '{best_match.text}' with score {best_score}.")
+                return best_match
+            else:
+                logger.debug(
+                    f"#{self.serial_number}: No matching button found for text '{text}'. Highest score: {best_score}%.")
+        except Exception as e:
+            logger.debug(
+                f"#{self.serial_number}: Error while searching for a button with text '{text}': {e}")
+        return None
+
+    def click_start(self, question_answer_map):
+        """
+        Finds and clicks the "Start" button.
+        """
+        stop_event.wait(2)
+        try:
+            start_button = self.find_button_by_text("Начать", threshold=70)
+            if start_button:
+                logger.debug(
+                    f"#{self.serial_number}: The 'Start' button is found. Scrolling and clicking...")
+                self.safe_click(start_button)
+                self.click_second_button(question_answer_map)
+            else:
+                logger.info(
+                    f"#{self.serial_number}: New courses is not found. All courses might be completed.")
+        except Exception as e:
+            logger.debug(f"#{self.serial_number}: Error during 'Start' button click: {e}")
+
+    def click_second_button(self, question_answer_map):
+        """
+        Finds and clicks the second button in the popup.
+        """
+        stop_event.wait(3)        
+        try:
+            self.reward = self.get_reward()
+            task_name = self.get_task_name()                
+        except Exception as e:
+            logger.debug(f"#{self.serial_number}: Error: {e}")
+        if task_name:
+            logger.info(f"#{self.serial_number}: Completing the courses: '{task_name}'")
+        try:
+            popup_button = self.driver.find_element(
+                By.XPATH, "//div[contains(@class, 'z-40') and text()='Начать']")
+            logger.debug(f"#{self.serial_number}: Second button found. Clicking...")
+            self.safe_click(popup_button)
+            self.execute_course(question_answer_map)
+        except Exception as e:
+            logger.debug(f"#{self.serial_number}: Second button not found: {e}")
+
+    def find_best_match(self, question, question_answer_map, threshold=70):
+        """
+        Finds the best matching question using a similarity score.
+        """
+        best_match = None
+        best_score = 0
+
+        for key in question_answer_map.keys():
+            score = fuzz.partial_ratio(question.lower(), key.lower())
+            if score > best_score:
+                best_score = score
+                best_match = key
+
+        if best_score >= threshold:
+            logger.debug(
+                f"#{self.serial_number}: Matching question found: '{best_match}' with similarity {best_score}%.")
+            return question_answer_map[best_match]
+        else:
+            logger.debug(
+                f"#{self.serial_number}: No matching question found. Highest similarity: {best_score}%.")
+            return None
+
+    def find_question_and_answer(self, question_answer_map, threshold=70):
+        """
+        Finds the question on the page and determines the corresponding answer.
+        """
+        try:
+            # Новый XPath для поиска текста вопроса
+            question_element = self.driver.find_element(
+                By.XPATH, "//span[contains(@class, 'font-tt-hoves-expanded')]"
+            )
+            question_text = question_element.text.strip()
+            logger.debug(f"#{self.serial_number}: Question text: '{question_text}'")
+
+            # Ищем лучший ответ
+            answer = self.find_best_match(
+                question_text, question_answer_map, threshold)
+            if answer:
+                logger.debug(f"#{self.serial_number}: Answer for the question: '{answer}'")
+                answer_button = self.find_button_by_text(answer)
+                if answer_button:
+                    logger.debug(f"#{self.serial_number}: Answer button found. Clicking...")
+                    self.safe_click(answer_button)
+                    return True
+                else:
+                    logger.debug(f"#{self.serial_number}: Answer button not found.")
+            else:
+                logger.debug(f"#{self.serial_number}: No matching answer found for the question.")
+
+        except NoSuchElementException:
+            logger.debug(f"#{self.serial_number}: Question element not found.")
+        except Exception as e:
+            logger.debug(f"#{self.serial_number}: Error processing the question: {e}")
+
+        return False
+
+    def execute_course(self, question_answer_map, max_time_per_course=90):
+        """
+        Выполняет курс с ограничением времени.
+        :param question_answer_map: Словарь с вопросами и ответами.
+        :param max_time_per_course: Максимальное время выполнения курса (в секундах).
+        """
+        start_time = time.time()  # Время начала курса
+
+        try:
+            while True:
+                # Проверяем, не истекло ли время
+                elapsed_time = time.time() - start_time
+                if elapsed_time > max_time_per_course:
+                    logger.warning(
+                        f"#{self.serial_number}: Time limit of {max_time_per_course} seconds exceeded. Exiting course execution."
+                    )
+                    return  # Прекращаем выполнение курса
+
+                next_button = self.find_button_by_text("Далее", threshold=70) or \
+                            self.find_button_by_text("Продолжить", threshold=70)
+
+                if next_button and next_button.get_attribute("disabled"):
+                    logger.debug(
+                        f"#{self.serial_number}: The 'Next' or 'Continue' button is disabled. Handling the question..."
+                    )
+                    if self.find_question_and_answer(question_answer_map):
+                        stop_event.wait(2)
+                        self.safe_click(next_button)
+                    else:
+                        logger.debug(
+                            f"#{self.serial_number}: Answer not found. Refreshing the current page..."
+                        )
+                        script = """
+                            window.location.assign(window.location.origin + window.location.pathname);
+                        """
+                        self.driver.execute_script(script)
+                        stop_event.wait(5)
+                        self.switch_to_iframe()
+                        return
+
+                if next_button:
+                    logger.debug(
+                        f"#{self.serial_number}: The 'Next' or 'Continue' button is active. Clicking..."
+                    )
+                    self.safe_click(next_button)
+                    continue  # Продолжаем цикл для следующего шага курса
+
+                else:
+                    logger.debug(
+                        f"#{self.serial_number}: The 'Next' or 'Continue' button is not found. Searching for the 'Claim' button..."
+                    )
+                    self.click_claim_button(question_answer_map)
+                    break  # Завершаем выполнение, если кнопка не найдена
+
+        except Exception as e:
+            logger.error(f"#{self.serial_number}: Error during quiz execution: {e}")
+
+
+    def click_claim_button(self, question_answer_map):
+        """
+        Waits for and clicks the "Claim" button.
+        """
+        try:
+            logger.debug(f"#{self.serial_number}: Waiting for the 'Claim' button to appear...")
+
+            # Ожидаем появления кнопки с классом и текстом "Забрать"
+            claim_button = WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((
+                    By.XPATH,
+                    "//button[contains(@class, 'claim-btn')]//div[text()='Забрать']"
+                ))
+            )
+
+            # Получаем родительский элемент <button> для клика
+            parent_button = claim_button.find_element(
+                By.XPATH, "./ancestor::button")
+            
+        
+            logger.debug(f"#{self.serial_number}: The 'Claim' button is found. Clicking...")
+            self.safe_click(parent_button)
+            if self.reward:
+                logger.info(f"#{self.serial_number}: Task completed. Reward received: {self.reward}")
+            stop_event.wait(5)            
+                
+            script = """
+                    window.location.assign(window.location.origin + window.location.pathname);
+                """
+            self.driver.execute_script(script)            
+            stop_event.wait(5)
+            self.click_start(question_answer_map)
+
+        except TimeoutException:
+            logger.debug(
+                f"#{self.serial_number}: The 'Claim' button did not appear. Searching for 'Start'...")
+            self.click_start(question_answer_map)
+        except Exception as e:
+            logger.debug(f"#{self.serial_number}: Error while waiting for the 'Claim' button: {e}")
+            
+    def get_task_name(self):
+        """
+        Retrieves the task name before clicking the second button.
+        """
+        try:
+            task_name_element = self.driver.find_element(
+                By.XPATH, "//div[@data-state='open']//span[contains(@class, 'text-base font-bold')]"
+            )
+            task_name = task_name_element.text.strip()
+            logger.debug(f"#{self.serial_number}: Task name retrieved: '{task_name}'")
+            return task_name
+        except NoSuchElementException:
+            logger.debug("Task name element not found.")
+            return None
+        except Exception as e:
+            logger.debug(f"#{self.serial_number}: Error while retrieving task name: {e}")
+            return None
+    
+    def get_reward(self):
+        """
+        Ищет и возвращает значение награды (например, '100 NUTS') на текущей странице.
+        """
+        try:
+            # Ожидаем появления всех элементов с классом font-bold
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "span.font-bold"))
+            )
+            
+            # Ищем элементы с текстом 'NUTS'
+            elements = self.driver.find_elements(By.CSS_SELECTOR, "span.font-bold")
+            for element in elements:
+                if "NUTS" in element.text:
+                    reward = element.text.strip()
+                    logger.debug(f"#{self.serial_number}: Reward found: {reward}")
+                    return reward
+
+            logger.debug(f"#{self.serial_number}: Reward not found.")
+            return None
+        except Exception as e:
+            logger.debug(f"#{self.serial_number}: Error while trying to find reward: {e}")
+            return None
+
+            
+    def run_courses_automation(self):
+        """
+        Запускает процесс автоматизации квиза.
+        """
+        logger.info(f"#{self.serial_number}: Сhecking the available courses...")
+        question_answer_map = {
+            "What is the key technology behind cryptocurrency?": "Blockchain",
+            "Как называется ключевая технология на базе которой работает криптовалюта?": "Blockchain",
+            "How many types of cryptocurrencies exist on the market today?": "13,000",
+            "Сколько видов криптовалют сегодня существует на рынке?": "13,000",
+            "Which currency has the largest market capitalization?": "ETH",
+            "У какой валюты из перечисленных самая большая капитализация?": "ETH",
+            "What is fiat?": "Traditional currency",
+            "Что такое фиат?": "Традиционная валюта",
+            "What can you do on a cryptocurrency exchange?": "Trade",
+            "Что можно делать на криптобирже?": "Торговать",
+            "What is P2P?": "Peer-to-peer cryptocurrency exchange",
+            "Что такое P2P?": "Обмен криптовалютой без посредников",
+            "How else can you exchange cryptocurrency?": "Through an exchanger",
+            "Как еще можно обменивать криптовалюту?": "Через обменник",
+            "When does the exchange confirm the transaction?": "When both parties confirm the exchange",
+            "Когда биржа подтверждает сделку?": "Когда обе стороны подтвердили, что обмен состоялся",
+            "What does the SQUID token example teach?": "It is important to analyze the project before investing.",
+            "Чему учит пример с токеном SQUID?": "Что важно анализировать проект перед инвестированием.",
+            "Select the type of cryptocurrency tied to the dollar:": "Stablecoin",
+            "Выбери тип криптовалюты, которая привязана к доллару": "Стейблкоин",
+            "BTC": "BTC",
+            "Which cryptocurrency listed is a blockchain coin?": "BTC",
+            "Какая криптовалюта из перечисленных является монетой блокчейна?": "BTC",
+            "Which principle is important for successful investments?": "Diversification — distributing investments among different cryptocurrencies.",
+            "Какой принцип является важным для успешных инвестиций?": "Диверсификация — распределение вложений между разными криптовалютами.",
+            "Which portfolio is suitable for long-term investments (2+ years) with capital of $1,000?": "Safe portfolio (20% USDT, 50% BTC, 30% ETH).",
+            "Какой портфель подходит для долгосрочных инвестиций (от двух лет) с капиталом от $1,000?": "Безопасный портфель (20% USDT, 50% BTC, 30% ETH).",
+            "What percentage of the stablecoin market does USDT occupy?": "75%",
+            "Сколько процентов рынка стейблкоинов занимает USDT?": "75%"
+        }
+        self.click_start(question_answer_map)

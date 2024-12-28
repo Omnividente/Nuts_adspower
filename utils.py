@@ -8,6 +8,7 @@ import sys
 import re
 import ctypes
 import requests
+import importlib
 import time
 import glob
 
@@ -145,9 +146,26 @@ class CustomFormatter(logging.Formatter):
         log_message = log_message.replace(
             record.msg, f"{message_color}{record.msg}{Style.RESET_ALL}")
         return log_message
+# Глобальная блокировка для защиты операций с файлами логов
+log_lock = threading.Lock()
 
+class SafeRotatingFileHandler(RotatingFileHandler):
+    def doRollover(self):
+        """
+        Переопределённый метод для безопасной ротации файла логов.
+        Закрывает файл перед ротацией и использует блокировку.
+        """
+        with log_lock:
+            if self.stream:
+                self.stream.close()
+                self.stream = None
+            # Выполняем стандартную ротацию
+            super().doRollover()
+            # Пересоздаём файловый поток после ротации
+            self.stream = self._open()
 
 # Настройка логгера
+
 def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, backup_count=1, log_dir="."):
     """
     Настройка логирования с разными уровнями для консоли и файла, с ротацией логов.
@@ -155,16 +173,15 @@ def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, b
     :param log_to_file: Если True, логи записываются в файл.
     :param log_file_size: Максимальный размер файла логов (в байтах).
     :param backup_count: Количество резервных копий файла логов.
+    :param log_dir: Директория для хранения файлов логов.
     """
-    logger = logging.getLogger(
-        "application_logger")  # Используем фиксированное имя логгера
-    # Устанавливаем самый высокий уровень для логгера
-    logger.setLevel(logging.DEBUG)
+    global stop_event  # Убедимся, что функция использует глобальную переменную stop_event
+    logger = logging.getLogger("application_logger")  # Используем фиксированное имя логгера
+    logger.setLevel(logging.DEBUG)  # Устанавливаем самый высокий уровень для логгера
 
     # Создаём временный обработчик для логирования на этапе удаления файлов
     temp_handler = logging.StreamHandler()
-    temp_handler.setFormatter(CustomFormatter(
-        "%(asctime)s - %(levelname)s - %(message)s"))
+    temp_handler.setFormatter(CustomFormatter("%(asctime)s - %(levelname)s - %(message)s"))
     temp_handler.setLevel(logging.DEBUG if debug_mode else logging.INFO)
     logger.addHandler(temp_handler)
 
@@ -173,6 +190,13 @@ def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, b
         handler.close()
         logger.removeHandler(handler)
 
+    # Проверяем stop_event перед продолжением
+    if stop_event.is_set():
+        temp_handler.setLevel(logging.INFO)  # Уменьшаем уровень логирования
+        logger.info("Stop event detected during setup. Logger setup aborted.")
+        logging.shutdown()
+        return logger
+
     # Создаём директорию для логов, если она не существует
     if log_to_file:
         if not os.path.exists(log_dir):
@@ -180,8 +204,7 @@ def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, b
                 os.makedirs(log_dir)
                 logger.debug(f"Log directory created: {log_dir}")
             except Exception as e:
-                logger.error(
-                    f"Failed to create log directory: {log_dir}. Error: {e}")
+                logger.error(f"Failed to create log directory: {log_dir}. Error: {e}")
                 raise
 
     # Удаляем старые файлы логов
@@ -192,8 +215,7 @@ def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, b
                 os.remove(log_file)
                 logger.debug(f"Log file deleted: {log_file}")
             except PermissionError:
-                logger.debug(
-                    f"Failed to delete log file {log_file}: file is locked.")
+                logger.debug(f"Failed to delete log file {log_file}: file is locked.")
             except Exception as e:
                 logger.error(f"Error deleting log file {log_file}: {e}")
 
@@ -201,15 +223,13 @@ def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, b
     logger.removeHandler(temp_handler)
 
     # Проверка поддержки ANSI
-    # Функция для проверки поддержки ANSI (оставлена без изменений)
     ansi_supported = supports_ansi()
 
     # Форматтеры
     console_formatter = CustomFormatter(
         "%(asctime)s - %(levelname)s - %(message)s", ansi_supported=ansi_supported
     )
-    file_formatter = StripAnsiFormatter(
-        "%(asctime)s - %(levelname)s - %(message)s")
+    file_formatter = StripAnsiFormatter("%(asctime)s - %(levelname)s - %(message)s")
 
     # Обработчик для консоли
     if ansi_supported:
@@ -218,8 +238,7 @@ def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, b
     else:
         # Альтернативный обработчик для старых Windows-консолей
         console_handler = WindowsColorHandler()
-        console_handler.setFormatter(logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"))
+        console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 
     # Уровень логирования для консоли
     console_handler.setLevel(logging.DEBUG if debug_mode else logging.INFO)
@@ -229,17 +248,27 @@ def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, b
     if log_to_file:
         log_file = os.path.join(log_dir, "debug.log")
         try:
-            file_handler = RotatingFileHandler(
+            file_handler = SafeRotatingFileHandler(
                 log_file, mode='a', maxBytes=log_file_size, backupCount=backup_count, encoding="utf-8"
             )
             file_handler.setFormatter(file_formatter)
             file_handler.setLevel(logging.DEBUG)
             logger.addHandler(file_handler)
         except PermissionError:
-            logger.warning(
-                "Failed to create log file due to permission issues.")
+            logger.warning("Failed to create log file due to permission issues.")
 
-    atexit.register(logging.shutdown)
+    # Регистрация безопасного завершения работы логгера при выходе
+    def shutdown_logging():
+        logger.debug("Shutting down logging...")
+        logging.shutdown()
+
+    # Проверяем stop_event перед завершением настройки
+    if stop_event.is_set():
+        logger.shutdown_logging("Stop event detected. Shutting down logging.")
+        shutdown_logging()
+        return logger
+
+    atexit.register(shutdown_logging)
     return logger
 
 
@@ -283,7 +312,7 @@ def is_debug_enabled():
 
 
 # Настроим логирование (если не было настроено ранее)
-logger = setup_logger()
+logger = setup_logger(debug_mode=False, log_dir="./log")
 
 balances = []
 
@@ -361,7 +390,7 @@ def get_all_profiles():
             profiles.extend(current_profiles)
             page += 1
 
-            time.sleep(1)
+            stop_event.wait(1)
         except requests.RequestException as e:
             logger.debug(f"An error occurred while accessing the API: {e}")
             break
@@ -442,6 +471,47 @@ def get_max_games(settings):
 
     return None  # Если max_games не задано или указано некорректно, возвращаем None
 
+def check_requirements(requirements_file="requirements.txt"):
+    """
+    Проверяет зависимости из файла requirements.txt.
+    Если зависимости отсутствуют, выводит предупреждение и завершает выполнение.
+    :param requirements_file: Путь к файлу requirements.txt
+    """    
+
+    try:
+        # Читаем зависимости из requirements.txt
+        with open(requirements_file, "r") as f:
+            requirements = f.read().splitlines()
+
+        missing_packages = []
+        for req in requirements:
+            # Удаляем указание версии (если есть) для проверки пакета
+            package = req.split("==")[0].strip()
+            try:
+                importlib.import_module(package)
+            except ImportError:
+                missing_packages.append(req)
+
+        # Если есть недостающие зависимости
+        if missing_packages:
+            logger.error("Some dependencies are missing:")
+            for pkg in missing_packages:
+                logger.error(f"  - {pkg}")
+
+            logger.error("\nYou can install them using the command:")
+            logger.error(f"pip install -r {requirements_file}\n")
+
+            # Завершаем выполнение
+            stop_event.set()
+
+        logger.info("All dependencies are installed.")
+
+    except FileNotFoundError:
+        logger.critical(f"Error: The file {requirements_file} was not found.")
+        stop_event.set()
+    except Exception as e:
+        logger.critical(f"Unknown error: {str(e)}")
+        stop_event.set()
 
 class GlobalFlags:
     interrupted = False

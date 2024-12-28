@@ -2,6 +2,5 @@ browser_manager.py
 telegram_bot_automation.py
 utils.py
 main.py
-remote_files_for_update
 requirements.txt
 update_manager.py
