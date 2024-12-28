@@ -1,8 +1,13 @@
+from utils import get_accounts, reset_balances, setup_logger, load_settings, is_debug_enabled, GlobalFlags, stop_event, get_color, visible, check_requirements
+import logging
+# Настройка логирования
+logger = logging.getLogger("application_logger")
+# Проверка установленных зависимостей
+check_requirements()
+
 import random
-import time
 from telegram_bot_automation import TelegramBotAutomation
 from update_manager import check_and_update, restart_script, ignore_files_in_git
-from utils import get_accounts, reset_balances, setup_logger, load_settings, is_debug_enabled, GlobalFlags, stop_event, get_color, visible, check_requirements
 from colorama import Fore, Style
 from prettytable import PrettyTable
 from datetime import datetime, timedelta
@@ -14,7 +19,6 @@ import os
 import argparse
 import sys
 import signal
-import logging
 import shutil
 import glob
 
@@ -25,8 +29,8 @@ import glob
 
 settings = load_settings()
 
-# Настройка логирования
-logger = logging.getLogger("application_logger")
+
+
 
 # Глобальные переменные
 bot = None
@@ -862,10 +866,8 @@ if __name__ == "__main__":
 
     # Устанавливаем обработчик
     sys.excepthook = handle_uncaught_exception
-    signal.signal(signal.SIGINT, signal.default_int_handler)
+    signal.signal(signal.SIGINT, signal.default_int_handler)   
     
-    # Проверка установленных зависимостей
-    check_requirements()
     
     task_processor_thread = None  # Инициализируем переменную
     try:
