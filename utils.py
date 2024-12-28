@@ -498,20 +498,20 @@ def check_requirements(requirements_file="requirements.txt"):
             for pkg in missing_packages:
                 logger.error(f"  - {pkg}")
 
-            logger.error("\nYou can install them using the command:")
+            logger.error("You can install them using the command:")
             logger.error(f"pip install -r {requirements_file}\n")
 
             # Завершаем выполнение
-            stop_event.set()
+            sys.exit("Error: Missing dependencies.")
 
         logger.info("All dependencies are installed.")
 
     except FileNotFoundError:
         logger.critical(f"Error: The file {requirements_file} was not found.")
-        stop_event.set()
+        sys.exit(f"Error: The file {requirements_file} was not found.")
     except Exception as e:
         logger.critical(f"Unknown error: {str(e)}")
-        stop_event.set()
+        sys.exit(f"Unknown error: {str(e)}")
 
 class GlobalFlags:
     interrupted = False
