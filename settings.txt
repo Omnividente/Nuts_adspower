@@ -2,25 +2,16 @@
 TELEGRAM_GROUP_URL=https://t.me/CryptoProjects_sbt
 
 # Реферальная ссылка (должна быть разменешна в группе выше)
-BOT_LINK=https://t.me/blum/app?startapp=ref_vNDGLmgnYL
-
-# Максимальное количество игр за один проход
-MAX_GAMES=
-
-# Список аккаунтов для запуска(по умолчанию используються все аккаунты из ADSPOWER)
-ACCOUNTS=
-
-# Включение/выключение выполнение квестов (квесты выполняются через API, используя запущенный активный профиль)
-ENABLE_QUESTS=false
+BOT_LINK=https://t.me/nutsfarm_bot/nutscoin?startapp=ref_YCNYYSFWGOQTBFS
 
 # URL репозитория для проверки обновлений
-REPOSITORY_URL=https://github.com/Omnividente/blum_adspower
-
+REPOSITORY_URL=https://github.com/Omnividente/Nuts_adspower
+ACCOUNTS=
 # Интервал проверки обновлений в секундах (по умолчанию 3 часа)
 UPDATE_INTERVAL=10800
 
 # Включение/выключение автоматических обновлений
-AUTO_UPDATE=false
+AUTO_UPDATE=False
 
 # Список файлов для проверки обновлений (через запятую)
 FILES_TO_UPDATE=remote_files_for_update
