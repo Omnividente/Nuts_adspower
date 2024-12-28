@@ -2,12 +2,13 @@ import random
 import time
 from telegram_bot_automation import TelegramBotAutomation
 from update_manager import check_and_update, restart_script, ignore_files_in_git
-from utils import get_accounts, reset_balances, setup_logger, load_settings, is_debug_enabled, GlobalFlags, stop_event, get_color, visible
+from utils import get_accounts, reset_balances, setup_logger, load_settings, is_debug_enabled, GlobalFlags, stop_event, get_color, visible, check_requirements
 from colorama import Fore, Style
 from prettytable import PrettyTable
 from datetime import datetime, timedelta
 from threading import Timer, Lock, Thread
 from queue import Queue, Empty
+import traceback
 import json
 import os
 import argparse
@@ -16,6 +17,7 @@ import signal
 import logging
 import shutil
 import glob
+
 
 ###################################################################################################################
 ###################################################################################################################
@@ -68,14 +70,15 @@ else:
     logger.debug(f"Timers file already exists: {TIMERS_FILE}")
 
 
+    
 def schedule_periodic_update_check(task_queue: Queue, interval: int = DEFAULT_UPDATE_INTERVAL):
     """
     Планирует периодическую проверку обновлений, добавляя задачу в очередь с учётом stop_event.
     """
     def periodic_task():
         while not stop_event.is_set():  # Цикл, пока не установлен stop_event
-            time.sleep(interval)  # Пауза на указанный интервал
-            if stop_event.is_set():  # Проверка перед выполнением задачи
+            #time.sleep(interval)  # Пауза на указанный интервал
+            if stop_event.wait(interval):  # Проверка перед выполнением задачи
                 logger.debug(
                     "Stop event set. Cancelling periodic update scheduling.")
                 break
@@ -188,117 +191,102 @@ def process_account(account, balance_dict, active_timers):
     Если другой аккаунт уже обрабатывается, ждёт его завершения.
     """
 
-    logger.info(f"Processing account: {account}")
+    logger.info(f"Processing account: {account}", extra={'color': Fore.CYAN})
     retry_count = 0
     success = False
     message_logged = False
     global bot
-    # Ожидаем освобождения глобальной блокировки
+
     while not stop_event.is_set():
         # Пытаемся захватить блокировку
         if active_profile_lock.acquire(blocking=False):
             try:
-                logger.debug(
-                    f"#{account}: Starting processing for account: {account}")
+                logger.debug(f"#{account}: Starting processing for account: {account}")
                 with account_lock:
                     while retry_count < 3 and not success and not stop_event.is_set():
                         try:
                             if stop_event.is_set():
-                                logger.info(
-                                    f"#{account}: Detected stop event. Exiting process_account.")
+                                logger.debug(f"#{account}: Stop event detected. Exiting.")
                                 return
+
                             # Инициализация объекта TelegramBotAutomation
                             bot = TelegramBotAutomation(account, settings)
 
-                            navigate_and_perform_actions(bot)
+                            # Выполнение действий
+                            navigate_and_perform_actions(bot, account)
 
                             # Получение данных аккаунта
                             username = bot.get_username()
-                            if not username or username == "N/A":  # Проверка имени пользователя
-                                raise Exception(
-                                    f"#{account}: Invalid username")
+                            if not username or username == "N/A":
+                                raise ValueError(f"#{account}: Invalid username")
 
                             balance = parse_balance(bot.get_balance())
-                            if balance <= 0:  # Проверка баланса
-                                raise Exception(
-                                    f"#{account}: Invalid balance")
+                            if balance <= 0:
+                                raise ValueError(f"#{account}: Invalid balance")
 
-                            next_schedule = calculate_next_schedule(
-                                bot.get_time())
+                            next_schedule = calculate_next_schedule(bot.get_time())
 
                             # Обновление баланса
                             update_balance_info(
-                                account, username, balance, next_schedule, "Success", balance_dict)
+                                account, username, balance, next_schedule, "Success", balance_dict
+                            )
                             success = True
-
                             logger.info(
-                                f"#{account}: Next schedule: {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}")
+                                f"#{account}: Next schedule: {next_schedule.strftime('%Y-%m-%d %H:%M:%S')}"
+                            )
 
-                            # Установка таймера для следующего запуска
+                            # Установка таймера
                             if next_schedule:
                                 schedule_next_run(
-                                    account, next_schedule, balance_dict, active_timers)
+                                    account, next_schedule, balance_dict, active_timers
+                                )
 
-                        except KeyboardInterrupt:
-                            if not GlobalFlags.interrupted:
-                                logger.info("KeyboardInterrupt detected.Exiting...",
-                                            extra={'color': Fore.RED})
-                                GlobalFlags.interrupted = True
-                            logger.info("KeyboardInterrupt detected in process_account. Exiting...", extra={
-                                'color': Fore.RED})
-                            stop_event.set()  # Устанавливаем флаг выхода
-                            return    # Прерывание поднимается выше для обработки в __main__
                         except Exception as e:
                             retry_count += 1
-                            if stop_event.is_set():
-                                logger.debug(
-                                    f"#{account}: Detected stop event during retry. Exiting.")
-                                return
-                            logger.warning(
-                                f"#{account}: Error on attempt {retry_count}: {e}")
+                            logger.debug(
+                                f"#{account}: Error on attempt {retry_count}: {e}"
+                            )
                             update_balance_info(
-                                account, "N/A", 0.0, datetime.now(), "ERROR", balance_dict)
+                                account, "N/A", 0.0, datetime.now(), "ERROR", balance_dict
+                            )
                             if retry_count >= 3:
-                                retry_delay = random.randint(
-                                    1800, 4200)  # 30–70 минут
+                                retry_delay = random.randint(1800, 4200)  # 30–70 минут
                                 next_retry_time = datetime.now() + timedelta(seconds=retry_delay)
                                 schedule_retry(
-                                    account, next_retry_time, balance_dict, active_timers, retry_delay)
+                                    account, next_retry_time, balance_dict, active_timers, retry_delay
+                                )
+
                         finally:
                             if not stop_event.is_set():
                                 if bot:
                                     try:
                                         bot.browser_manager.close_browser()
-                                    except Exception as e:
-                                        logger.warning(
-                                            f"#{account}: Failed to close browser: {e}")
+                                    except Exception:
+                                        logger.debug(f"#{account}: Failed to close browser.")
 
-                # Генерация и отображение таблицы только при успешной обработке
                 if success:
-                    generate_and_display_table(
-                        balance_dict, table_type="balance", show_total=True)
+                    generate_and_display_table(balance_dict, table_type="balance", show_total=True)
 
             finally:
-                active_profile_lock.release()  # Освобождаем блокировку
-                message_logged = False
-                logger.debug(
-                    f"#{account}: Completed processing for account: {account}")
+                active_profile_lock.release()
+                logger.debug(f"#{account}: Completed processing for account.")
             break  # Выходим из цикла ожидания
+
         else:
             if not message_logged:
-                logger.debug(
-                    f"#{account}: is waiting for the active profile to complete...")
-                message_logged = True  # Устанавливаем флаг, чтобы не дублировать сообщение
-            time.sleep(1)  # Период ожидания
+                logger.debug(f"#{account}: Waiting for active profile lock.")
+                message_logged = True
+            stop_event.wait(1)  # Используем `wait` вместо `time.sleep` для быстрого выхода
+
         if stop_event.is_set():
-            logger.info(
-                f"#{account}: Detected stop event in outer loop. Exiting process_account.")
+            logger.debug(f"#{account}: Stop event detected in outer loop. Exiting.")
             return
+
 
 # Навигация и выполнение действий с ботом
 
 
-def navigate_and_perform_actions(bot):
+def navigate_and_perform_actions(bot, account):
     """
     Навигация и выполнение всех задач с ботом.
     """
@@ -327,22 +315,35 @@ def navigate_and_perform_actions(bot):
         logger.debug("Stop event detected. Aborting after starting app.")
         return
 
+    logger.debug("Preparing account...")
     bot.preparing_account()
 
     if stop_event.is_set():
-        logger.debug("Stop event detected. Aborting before performing quests.")
+        logger.debug("Stop event detected. Aborting before run courses.")
         return
-
-    logger.debug("Performing quests...")
-    bot.perform_quests()  # Выполнение квестов
+    bot.run_courses_automation()
+    
+    if stop_event.is_set():
+        logger.debug("Stop event detected. Aborting before run to Home tab.")
+        return
+    
+    if not bot.click_home_tab():        
+        logger.error("Stop event detected. Aborting before run to Home tab.")
+        raise Exception("Failed to click home tab") 
+    
 
     if stop_event.is_set():
         logger.debug("Stop event detected. Aborting before farming.")
         return
 
     logger.debug("Starting farming...")
-    bot.farming()
+    bot.farming()       
+    if stop_event.is_set():
+        logger.debug("Stop event detected. Aborting before performing quests.")
+        return
 
+    logger.debug("Performing quests...")
+    bot.perform_quests()  # Выполнение квестов
 
 # Парсинг баланса
 def parse_balance(balance):
@@ -550,64 +551,67 @@ def task_queue_processor(task_queue, active_timers):
     while not stop_event.is_set():
         try:
             # Получаем задачу из очереди с таймаутом
-            task = task_queue.get(timeout=1)
-            if stop_event.is_set():  # Проверка после ожидания
+            try:
+                task = task_queue.get(timeout=1)  # Ждём задачу с таймаутом
+            except Empty:
+                if not has_logged_queue_empty:
+                    logger.debug("Queue is empty, waiting for new tasks.")
+                    has_logged_queue_empty = True
+                continue  # Переходим к следующей итерации
+
+            if stop_event.is_set():  # Проверка на сигнал завершения
+                logger.debug("Stop event detected after task fetch. Exiting.")
                 break
-            # Проверяем на сигнал завершения
-            if task is None:
+
+            has_logged_queue_empty = False  # Очередь больше не пуста
+            logger.debug(f"Fetched task: {task}")
+
+            # Проверка и обработка задачи
+            if task is None:  # Сигнал завершения
                 logger.debug("Stop signal received. Exiting processor...")
                 break
 
-            logger.debug(f"Fetched task: {task}")
-
-            # Обработка задач
             if isinstance(task, tuple):
-                if len(task) == 2:  # check_updates
+                if len(task) == 2:  # Task: check_updates
                     task_type, task_data = task
                     if task_type == "check_updates":
+                        logger.debug("Running scheduled update check.")
                         try:
-                            logger.info("Running scheduled update check...")
                             check_and_update(
                                 priority_task_queue=task_queue,
                                 is_task_active=lambda: not task_queue.empty()
                             )
                         except Exception as e:
-                            logger.error(
-                                f"Error during scheduled update check: {e}")
-                elif len(task) == 3:  # process_account
+                            logger.debug(f"Error during update check: {e}")
+                elif len(task) == 3:  # Task: process_account
                     account, balance_dict, active_timers = task
+                    logger.debug(f"Processing account {account} from queue.")
                     try:
-                        logger.debug(
-                            f"Processing account {account} from queue.")
                         process_account(account, balance_dict, active_timers)
                     except Exception as e:
-                        logger.error(
-                            f"Error during account processing for {account}: {e}")
-                        # Можно логировать статус профиля как "ERROR"
+                        logger.debug(f"Error processing account {account}: {e}")
                         update_balance_info(
                             account, "N/A", 0.0, datetime.now(), "ERROR", balance_dict
                         )
                 else:
-                    logger.warning(f"Unknown task structure: {task}")
+                    logger.debug(f"Unknown task structure: {task}")
             else:
-                logger.warning(f"Unexpected task structure: {task}")
+                logger.debug(f"Unexpected task format: {task}")
 
-            # Помечаем задачу как выполненную
+            # Завершаем задачу
             task_queue.task_done()
             logger.debug(f"Task {task} marked as done.")
 
         except Empty:
             if stop_event.is_set():
-                logger.debug(
-                    "Stop event set during queue wait. Exiting processor...")
+                logger.debug("Stop event detected during queue wait. Exiting.")
                 break
-            if not has_logged_queue_empty:
-                logger.debug("Queue is empty, waiting for new tasks.")
-                has_logged_queue_empty = True
+
         except Exception as e:
-            logger.error(f"Unhandled exception in task processor: {e}")
+            logger.debug(f"Unhandled exception in task processor: {e}")
 
     logger.debug("Task queue processor stopped.")
+
 
 
 # Планирование повторной попытки
@@ -622,45 +626,50 @@ def schedule_retry(account, next_retry_time, balance_dict, active_timers, retry_
     :param retry_delay: Задержка перед повторной попыткой (в секундах).
     """
     try:
-        # Проверка на stop_event перед планированием задачи
+        # Проверяем stop_event перед планированием задачи
         if stop_event.is_set():
-            logger.info(
-                f"#{account}: Stop event set. Skipping retry scheduling.")
+            logger.debug(f"#{account}: Stop event detected. Skipping retry scheduling.")
             return
 
         # Обновляем информацию о следующем запуске
-        update_balance_info(account, "N/A", 0.0,
-                            next_retry_time, "ERROR", balance_dict)
+        update_balance_info(
+            account, "N/A", 0.0, next_retry_time, "ERROR", balance_dict
+        )
 
         def retry_task():
             """
             Запускает повторную попытку process_account после задержки.
             """
-            if stop_event.is_set():
-                logger.info(
-                    f"#{account}: Stop event set. Cancelling retry for account.")
-                return  # Прерываем выполнение задачи
+            try:
+                if stop_event.is_set():
+                    logger.debug(f"#{account}: Stop event detected. Cancelling retry.")
+                    return  # Прерываем выполнение задачи
 
-            logger.info(f"#{account}: Retrying process_account after delay.")
-            process_account(account, balance_dict, active_timers)
+                logger.debug(f"#{account}: Retrying process_account after delay.")
+                process_account(account, balance_dict, active_timers)
+            except Exception as retry_error:
+                logger.debug(
+                    f"#{account}: Exception during retry execution: {retry_error}", exc_info=True
+                )
+            finally:
+                # Удаляем таймер из active_timers после завершения
+                active_timers.remove(timer)
 
-        # Создаём таймер и добавляем в активные таймеры
+        # Создаём таймер и добавляем в список активных таймеров
         timer = Timer(retry_delay, retry_task)
         active_timers.append(timer)
         timer.start()
 
         # Логирование для отладки
-        if is_debug_enabled():
-            logger.debug(
-                f"#{account}: Retry scheduled for {account} at {next_retry_time.strftime('%Y-%m-%d %H:%M:%S')} "
-                f"with a delay of {retry_delay} seconds."
-            )
+        logger.debug(
+            f"#{account}: Retry scheduled for {next_retry_time.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"with a delay of {retry_delay} seconds."
+        )
     except Exception as e:
-        logger.error(
-            f"#{account}: Error scheduling retry for account {account}: {e}")
-        if is_debug_enabled():
-            logger.debug(
-                f"#{account}: Error traceback:", exc_info=True)
+        logger.debug(
+            f"#{account}: Exception while scheduling retry: {e}", exc_info=True
+        )
+
 
 
 def generate_and_display_table(data, table_type="balance", show_total=True):
@@ -802,157 +811,192 @@ def sync_timers_with_balance(balance_dict):
 
 def cleanup_resources(active_timers, task_queue):
     global bot
-    """Останавливает все активные таймеры, выполняет очистку ресурсов и очищает очередь."""
+    """
+    Останавливает все активные таймеры, выполняет очистку ресурсов и очищает очередь.
+    """
     logger.info("Cleaning up active timers...", extra={'color': Fore.YELLOW})
 
     # Завершаем все таймеры
-    for timer in active_timers:
-        logger.debug(f"Discarding timer during cleanup")
-        if timer.is_alive():
-            timer.cancel()
-    active_timers.clear()
+    try:
+        for timer in list(active_timers):  # Создаём копию списка для безопасного перебора
+            if timer.is_alive():
+                logger.debug("Cancelling active timer during cleanup.")
+                timer.cancel()
+        active_timers.clear()
+        logger.debug("All active timers have been cleared.")
+    except Exception as timer_error:
+        logger.debug(f"Exception during timers cleanup: {timer_error}", exc_info=True)
+
     # Очищаем задачи из очереди
-    while not task_queue.empty():
-        try:
+    try:
+        while not task_queue.empty():
             task = task_queue.get_nowait()  # Извлекаем задачу без ожидания
             logger.debug(f"Discarding task during cleanup: {task}")
             task_queue.task_done()  # Помечаем задачу как выполненную
-        except Exception as e:
-            logger.error(f"Error while cleaning up task queue: {e}")
+        logger.debug("Task queue successfully cleared.")
+    except Exception as queue_error:
+        logger.debug(f"Exception during task queue cleanup: {queue_error}", exc_info=True)
 
     # Закрываем браузер, если он существует
     if bot:
         try:
+            logger.info("Closing browser during cleanup...", extra={'color': Fore.CYAN})
             bot.browser_manager.close_browser()
-        except Exception as e:
-            logger.warning(f"Failed to close browser: {e}")
+        except Exception as browser_error:
+            logger.warning(f"Failed to close browser: {browser_error}")
+        finally:
+            bot = None  # Очищаем глобальный объект `bot` для предотвращения утечек
 
-    logger.info("All resources cleaned up. Exiting gracefully.",
-                extra={'color': Fore.MAGENTA})
+    logger.info("All resources cleaned up. Exiting gracefully.", extra={'color': Fore.MAGENTA})
+
 
 
 if __name__ == "__main__":
+    # Глобальный обработчик исключений
+    def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            # Игнорируем KeyboardInterrupt для корректного завершения
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logger.error("Uncaught exception occurred", exc_info=(exc_type, exc_value, exc_traceback))
+
+    # Устанавливаем обработчик
+    sys.excepthook = handle_uncaught_exception
     signal.signal(signal.SIGINT, signal.default_int_handler)
-
-    # Настройка аргументов командной строки
-    parser = argparse.ArgumentParser(
-        description="Run the script with optional debug logging.")
-    parser.add_argument("--debug", action="store_true",
-                        help="Enable debug logging")
-    parser.add_argument("--account", type=int,
-                        help="Force processing a specific account")
-    parser.add_argument(
-        "--visible", type=int, choices=[0, 1], default=0, help="Set visible mode (1 for visible, 0 for headless)"
-    )
-    args = parser.parse_args()
-
-    # Установка флага visible
-    if args.visible == 1:
-        visible.set()
-        logger.info("Visible mode enabled.")
-    else:
-        visible.clear()
-        logger.info("Headless mode enabled.")
-
-    # Настройка логирования
-    logger = setup_logger(debug_mode=args.debug, log_dir="./log")
     
-    # Отключение отслеживания в github 
-    files_to_ignore = ["settings.txt", "accounts.txt"]
-    ignore_files_in_git(files_to_ignore)
+    # Проверка установленных зависимостей
+    check_requirements()
     
-    # Принудительный запуск аккаунта
-    if args.account:
-        account = args.account
-        logger.debug(f"Processing account {args.account} in debug mode...")
-        try:
-            process_account(args.account, balance_dict, active_timers)
-            logger.info(
-                f"Account {args.account} processing completed. Exiting.")
-        except Exception as e:
-            logger.error(f"Error during forced account processing: {e}")
-        finally:
-            cleanup_resources(active_timers, task_queue)
-            sys.exit(0)  # Завершаем выполнение после обработки аккаунта
-
-    # Загрузка настроек и таймеров
-    timers_data = load_timers()
-    update_interval = int(settings.get(
-        "UPDATE_INTERVAL", DEFAULT_UPDATE_INTERVAL))
-    logger.debug("Performing initial update check...")
-    check_and_update(priority_task_queue=task_queue,
-                     is_task_active=lambda: not task_queue.empty())
-    schedule_periodic_update_check(task_queue, update_interval)
-
+    task_processor_thread = None  # Инициализируем переменную
     try:
-        reset_balances()
-        accounts = get_accounts()
-        sync_timers_with_balance(balance_dict)
-        generate_and_display_table(timers_data, table_type="timers")
-        logger.info("Starting account processing cycle.")
-
-        # Запуск обработчика очереди задач
-        task_processor_thread = Thread(
-            target=task_queue_processor,
-            args=(task_queue, active_timers),
-            daemon=True
+        # Настройка аргументов командной строки
+        parser = argparse.ArgumentParser(
+            description="Run the script with optional debug logging."
         )
-        task_processor_thread.start()
+        parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+        parser.add_argument("--account", type=int, help="Force processing a specific account")
+        parser.add_argument(
+            "--visible", type=int, choices=[0, 1], default=0, help="Set visible mode (1 for visible, 0 for headless)"
+        )
+        args = parser.parse_args()
 
-        # Обработка аккаунтов
-        for account in accounts:
-            if stop_event.is_set():
-                logger.info(
-                    "Stop event detected. Stopping account processing.")
-                break
+        # Установка флага visible
+        if args.visible == 1:
+            visible.set()
+            logger.info("Visible mode enabled.")
+        else:
+            visible.clear()
+            logger.info("Headless mode enabled.")
 
+        # Настройка логирования
+        logger = setup_logger(debug_mode=args.debug, log_dir="./log")
+        # enable_quests = settings.get("ENABLE_QUESTS", "false").strip().lower() == "true"
+
+        # if enable_quests:
+        #     logger.info("Quests are enabled.")
+        # else:
+        #     logger.info("Quests are disabled.")
+
+        # Отключение отслеживания в GitHub
+        files_to_ignore = ["settings.txt", "accounts.txt"]
+        ignore_files_in_git(files_to_ignore)
+
+        # Принудительный запуск аккаунта
+        if args.account:
+            account = args.account
+            logger.debug(f"Processing account {args.account} in debug mode...")
             try:
-                # Проверяем таймеры и планируем выполнение
-                if account in timers_data:
-                    timer_info = timers_data[account]
-                    next_schedule = datetime.strptime(
-                        timer_info["next_schedule"], "%Y-%m-%d %H:%M:%S")
-                    if next_schedule > datetime.now():
-                        logger.debug(
-                            f"#{account}: Account scheduled for {next_schedule}. Skipping immediate processing.")
-                        schedule_next_run(
-                            account, next_schedule, balance_dict, active_timers)
-                        continue
-
-                logger.debug(
-                    f"#{account}: Adding account to task queue for processing.")
-                task_queue.put((account, balance_dict, active_timers))
+                process_account(args.account, balance_dict, active_timers)
+                logger.info(f"Account {args.account} processing completed. Exiting.")
             except Exception as e:
-                logger.error(f"Error while scheduling account {account}: {e}")
+                logger.error(f"Error during forced account processing: {e}")
+            finally:
+                cleanup_resources(active_timers, task_queue)
+                sys.exit(0)  # Завершаем выполнение после обработки аккаунта
 
-        # Ожидание завершения таймеров
-        while not stop_event.is_set() and any(timer.is_alive() for timer in active_timers):
-            time.sleep(1)
+        # Загрузка настроек и таймеров
+        timers_data = load_timers()
+        update_interval = int(settings.get("UPDATE_INTERVAL", DEFAULT_UPDATE_INTERVAL))
+        logger.debug("Performing initial update check...")
+        check_and_update(priority_task_queue=task_queue, is_task_active=lambda: not task_queue.empty())
+        schedule_periodic_update_check(task_queue, update_interval)
+        while not stop_event.is_set():
+            try:
+                reset_balances()
+                accounts = get_accounts()
+                sync_timers_with_balance(balance_dict)
+                generate_and_display_table(timers_data, table_type="timers")
+                logger.info("Starting account processing cycle.")
 
-        # Повторное ожидание цикла
-        if not stop_event.is_set():
-            logger.info("Restarting the cycle in 5 minutes...")
-            time.sleep(300)
+                # Запуск обработчика очереди задач
+                task_processor_thread = Thread(
+                    target=task_queue_processor,
+                    args=(task_queue, active_timers),
+                    daemon=True
+                )
+                task_processor_thread.start()
 
+                # Обработка аккаунтов
+                for account in accounts:
+                    if stop_event.is_set():
+                        logger.info("Stop event detected. Stopping account processing.")
+                        break
+
+                    try:
+                        # Проверяем таймеры и планируем выполнение
+                        if account in timers_data:
+                            timer_info = timers_data[account]
+                            next_schedule = datetime.strptime(
+                                timer_info["next_schedule"], "%Y-%m-%d %H:%M:%S"
+                            )
+                            if next_schedule > datetime.now():
+                                logger.debug(
+                                    f"#{account}: Account scheduled for {next_schedule}. Skipping immediate processing."
+                                )
+                                schedule_next_run(account, next_schedule, balance_dict, active_timers)
+                                continue
+                        if stop_event.is_set():  # Дополнительная проверка перед добавлением в очередь
+                            break                
+                        logger.debug(f"#{account}: Adding account to task queue for processing.")
+                        task_queue.put((account, balance_dict, active_timers))
+                    except Exception as e:
+                        logger.error(f"Error while scheduling account {account}: {e}")
+
+                # Ожидание завершения таймеров
+                while not stop_event.is_set() and any(timer.is_alive() for timer in active_timers):
+                    stop_event.wait(1)  # Используем stop_event для быстрой проверки и выхода
+
+                # Повторное ожидание цикла
+                if not stop_event.is_set():
+                    logger.info("Restarting the cycle in 5 minutes...")
+                    stop_event.wait(300)  # Заменяем time.sleep на stop_event.wait
+            except Exception as e:
+                logger.error(f"Unhandled exception in main loop: {e}")
+                logger.info("Continuing execution despite the error.")
     except KeyboardInterrupt:
         if not GlobalFlags.interrupted:
-            logger.info("KeyboardInterrupt detected. Exiting...",
-                        extra={'color': Fore.RED})
+            logger.info("KeyboardInterrupt detected. Exiting...", extra={'color': Fore.RED})
         stop_event.set()
     except Exception as e:
         logger.error(f"Unhandled exception in main loop: {e}")
-    finally:
-        # Завершаем ресурсы
+    finally:        
         logger.debug("Waiting for task queue processor to stop...")
         task_queue.put(None)
-        task_processor_thread.join(timeout=5)
-        if task_processor_thread.is_alive():
-            logger.debug(
-                "Task queue processor thread did not terminate in time. Forcing shutdown.")
+        
+        if task_processor_thread and task_processor_thread.is_alive():
+            try:
+                task_processor_thread.join(timeout=5)
+                if task_processor_thread.is_alive():
+                    logger.debug("Task queue processor thread did not terminate in time. Forcing shutdown.")
+            except Exception as e:
+                logger.error(f"Error during task processor thread shutdown: {e}")
+
         cleanup_resources(active_timers, task_queue)
 
-        # Перезапуск или завершение
+        # Завершение или перезапуск
         if getattr(stop_event, "restart_mode", False):
             restart_script()
         else:
             logger.debug("Main thread exiting gracefully.")
+        
+    

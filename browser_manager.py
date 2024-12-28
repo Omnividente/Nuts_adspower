@@ -66,45 +66,42 @@ class BrowserManager:
 
     def wait_browser_close(self):
         """
-        Ожидает закрытия браузера, если он активен.
+        Ожидает закрытия браузера, если он активен, с проверкой stop_event.
         """
         try:
-            if self.check_browser_status():
-                logger.info(
-                    f"#{self.serial_number}: Browser already open. Waiting for closure.")
-                start_time = time.time()
-                timeout = 900  # Устанавливаем тайм-аут на 15 минут
-
-                while time.time() - start_time < timeout:
-                    try:
-                        if not self.check_browser_status():
-                            logger.info(
-                                f"#{self.serial_number}: Browser successfully closed.")
-                            return True
-                    except Exception as e:
-                        logger.warning(
-                            f"#{self.serial_number}: Error while checking browser status during wait: {str(e)}")
-                        logger.debug(traceback.format_exc())
-
-                    time.sleep(5)
-
-                logger.warning(
-                    f"#{self.serial_number}: Waiting time for browser closure has expired.")
-                return False
-            else:
-                logger.debug(
-                    f"#{self.serial_number}: Browser is not active, no need to wait.")
+            if not self.check_browser_status():
+                logger.debug(f"#{self.serial_number}: Browser is not active, no need to wait.")
                 return True
+
+            logger.debug(f"#{self.serial_number}: Browser is active. Waiting for closure.")
+            timeout = 900  # Тайм-аут на 15 минут
+            start_time = time.time()
+
+            while time.time() - start_time < timeout:
+                if stop_event.is_set():
+                    logger.debug(f"#{self.serial_number}: Stop event detected. Exiting wait.")
+                    return False
+
+                try:
+                    if not self.check_browser_status():
+                        logger.debug(f"#{self.serial_number}: Browser successfully closed.")
+                        return True
+                except Exception as e:
+                    logger.debug(f"#{self.serial_number}: Error checking browser status: {str(e)}")
+
+                # Используем короткий sleep с проверкой stop_event
+                stop_event.wait(5)
+
+            logger.debug(f"#{self.serial_number}: Waiting time for browser closure expired.")
+            return False
+
         except WebDriverException as e:
-            logger.warning(
-                f"#{self.serial_number}: WebDriverException while waiting for browser closure: {str(e)}")
-            logger.debug(traceback.format_exc())
+            logger.debug(f"#{self.serial_number}: WebDriverException while waiting for browser closure: {str(e)}")
             return False
         except Exception as e:
-            logger.error(
-                f"#{self.serial_number}: Unexpected error while waiting for browser closure: {str(e)}")
-            logger.debug(traceback.format_exc())
+            logger.debug(f"#{self.serial_number}: Unexpected error while waiting for browser closure: {str(e)}")
             return False
+
 
     def start_browser(self):
         """
@@ -120,7 +117,7 @@ class BrowserManager:
                     logger.info(
                         f"#{self.serial_number}: Browser already open. Closing the existing browser.")
                     self.close_browser()
-                    time.sleep(5)
+                    stop_event.wait(5)
 
                 # Формирование URL для запуска браузера
                 request_url = (
@@ -169,23 +166,23 @@ class BrowserManager:
                     logger.warning(
                         f"#{self.serial_number}: Failed to start the browser. Error: {data.get('msg', 'Unknown error')}")
                     retries += 1
-                    time.sleep(5)  # Задержка перед повторной попыткой
+                    stop_event.wait(5)  # Задержка перед повторной попыткой
 
             except requests.exceptions.RequestException as e:
                 logger.error(
                     f"#{self.serial_number}: Network issue when starting browser: {str(e)}")
                 retries += 1
-                time.sleep(5)
+                stop_event.wait(5)
             except WebDriverException as e:
                 logger.warning(
                     f"#{self.serial_number}: WebDriverException occurred: {str(e)}")
                 retries += 1
-                time.sleep(5)
+                stop_event.wait(5)
             except Exception as e:
                 logger.exception(
                     f"#{self.serial_number}: Unexpected exception in starting browser: {str(e)}")
                 retries += 1
-                time.sleep(5)
+                stop_event.wait(5)
 
         logger.error(
             f"#{self.serial_number}: Failed to start browser after {self.MAX_RETRIES} retries.")
