@@ -143,13 +143,13 @@ class FileUpdater:
                 # Получаем удалённое содержимое файла
                 remote_content = response.content
                 remote_hash = calculate_hash(remote_content)
-
+                logger.debug(f"remote_hash for {file_path}: {remote_hash}")
                 # Проверяем локальный файл
                 if os.path.exists(file_path):
                     with open(file_path, "rb") as f:
                         local_content = f.read()
                     local_hash = calculate_hash(local_content)
-
+                    logger.debug(f"local_hash for {file_path}: {local_hash}")
                     # Сравниваем хэши локального и удалённого содержимого
                     if local_hash != remote_hash:
                         updates.append(file_path)
