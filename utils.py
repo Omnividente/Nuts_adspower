@@ -151,18 +151,17 @@ log_lock = threading.Lock()
 
 class SafeRotatingFileHandler(RotatingFileHandler):
     def doRollover(self):
-        """
-        Переопределённый метод для безопасной ротации файла логов.
-        Закрывает файл перед ротацией и использует блокировку.
-        """
         with log_lock:
-            if self.stream:
-                self.stream.close()
-                self.stream = None
-            # Выполняем стандартную ротацию
-            super().doRollover()
-            # Пересоздаём файловый поток после ротации
-            self.stream = self._open()
+            try:
+                if self.stream:
+                    self.stream.close()
+                    self.stream = None
+                # Выполняем стандартную ротацию
+                super().doRollover()
+                # Пересоздаём файловый поток после ротации
+                self.stream = self._open()
+            except Exception as e:
+                logger.error(f"Error during log rollover: {e}")
 
 # Настройка логгера
 
@@ -207,17 +206,6 @@ def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, b
                 logger.error(f"Failed to create log directory: {log_dir}. Error: {e}")
                 raise
 
-    # Удаляем старые файлы логов
-    if log_to_file:
-        log_pattern = os.path.join(log_dir, "debug.log*")
-        for log_file in glob.glob(log_pattern):
-            try:
-                os.remove(log_file)
-                logger.debug(f"Log file deleted: {log_file}")
-            except PermissionError:
-                logger.debug(f"Failed to delete log file {log_file}: file is locked.")
-            except Exception as e:
-                logger.error(f"Error deleting log file {log_file}: {e}")
 
     # Удаляем временный обработчик после завершения инициализации
     logger.removeHandler(temp_handler)
