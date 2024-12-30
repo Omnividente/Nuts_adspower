@@ -146,94 +146,95 @@ class CustomFormatter(logging.Formatter):
         log_message = log_message.replace(
             record.msg, f"{message_color}{record.msg}{Style.RESET_ALL}")
         return log_message
+
+
 # Глобальная блокировка для защиты операций с файлами логов
 log_lock = threading.Lock()
 
+
 class SafeRotatingFileHandler(RotatingFileHandler):
     def doRollover(self):
+        """
+        Безопасная ротация файла логов с проверкой блокировки и попытками повторной ротации.
+        """
         with log_lock:
-            try:
-                if self.stream:
-                    self.stream.close()
-                    self.stream = None
-                # Выполняем стандартную ротацию
-                super().doRollover()
-                # Пересоздаём файловый поток после ротации
-                self.stream = self._open()
-            except Exception as e:
-                logger.error(f"Error during log rollover: {e}")
+            if stop_event.is_set():
+                logging.warning("Stop event detected. Rollover aborted.")
+                return
+
+            retries = 3  # Количество попыток ротации
+            delay = 0.1  # Задержка между попытками
+
+            for attempt in range(retries):
+                try:
+                    # Закрываем текущий поток, если он существует
+                    if self.stream:
+                        self.stream.close()
+                        self.stream = None
+
+                    # Проверяем доступность файла
+                    if os.path.exists(self.baseFilename):
+                        with open(self.baseFilename, "a"):
+                            pass
+
+                    # Выполняем стандартную ротацию
+                    super().doRollover()
+                    self.stream = self._open()
+                    logging.info("Log rollover completed successfully.")
+                    break
+                except PermissionError as e:
+                    if attempt < retries - 1:
+                        logging.warning(
+                            f"File is locked. Retrying log rollover (attempt {attempt + 1}/{retries})."
+                        )
+                        time.sleep(delay)
+                        continue
+                    logging.error(
+                        f"Error during log rollover after {retries} attempts: {e}")
 
 # Настройка логгера
 
-def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, backup_count=1, log_dir="."):
-    """
-    Настройка логирования с разными уровнями для консоли и файла, с ротацией логов.
-    :param debug_mode: Если True, в консоль выводятся DEBUG сообщения.
-    :param log_to_file: Если True, логи записываются в файл.
-    :param log_file_size: Максимальный размер файла логов (в байтах).
-    :param backup_count: Количество резервных копий файла логов.
-    :param log_dir: Директория для хранения файлов логов.
-    """
-    global stop_event  # Убедимся, что функция использует глобальную переменную stop_event
-    logger = logging.getLogger("application_logger")  # Используем фиксированное имя логгера
-    logger.setLevel(logging.DEBUG)  # Устанавливаем самый высокий уровень для логгера
 
-    # Создаём временный обработчик для логирования на этапе удаления файлов
-    temp_handler = logging.StreamHandler()
-    temp_handler.setFormatter(CustomFormatter("%(asctime)s - %(levelname)s - %(message)s"))
-    temp_handler.setLevel(logging.DEBUG if debug_mode else logging.INFO)
-    logger.addHandler(temp_handler)
+def setup_logger(debug_mode=False, log_to_file=False, log_file_size=512 * 1024, backup_count=1, log_dir="."):
+    """
+    Настройка логирования с поддержкой ротации и корректной обработки флага stop_event.
+    """
+    logger = logging.getLogger("application_logger")
+    logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
 
-    # Удаляем старые обработчики (если есть)
+    # Удаляем старые обработчики
     for handler in logger.handlers[:]:
-        handler.close()
-        logger.removeHandler(handler)
+        try:
+            handler.close()
+            logger.removeHandler(handler)
+        except Exception as e:
+            logger.warning(f"Error closing handler: {e}")
 
-    # Проверяем stop_event перед продолжением
-    if stop_event.is_set():
-        temp_handler.setLevel(logging.INFO)  # Уменьшаем уровень логирования
-        logger.info("Stop event detected during setup. Logger setup aborted.")
-        logging.shutdown()
-        return logger
+    # Форматтеры
+    ansi_supported = supports_ansi()  # Проверка поддержки ANSI
+    console_formatter = CustomFormatter(
+        "%(asctime)s - %(levelname)s - %(message)s", ansi_supported=ansi_supported
+    )
+    file_formatter = StripAnsiFormatter(
+        "%(asctime)s - %(levelname)s - %(message)s")
 
-    # Создаём директорию для логов, если она не существует
+    # Обработчик для консоли
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(console_formatter)
+    console_handler.setLevel(logging.DEBUG if debug_mode else logging.INFO)
+    logger.addHandler(console_handler)
+
+    # Настройка файлового обработчика
     if log_to_file:
         if not os.path.exists(log_dir):
             try:
                 os.makedirs(log_dir)
                 logger.debug(f"Log directory created: {log_dir}")
             except Exception as e:
-                logger.error(f"Failed to create log directory: {log_dir}. Error: {e}")
+                logger.error(
+                    f"Failed to create log directory: {log_dir}. Error: {e}")
                 raise
 
-
-    # Удаляем временный обработчик после завершения инициализации
-    logger.removeHandler(temp_handler)
-
-    # Проверка поддержки ANSI
-    ansi_supported = supports_ansi()
-
-    # Форматтеры
-    console_formatter = CustomFormatter(
-        "%(asctime)s - %(levelname)s - %(message)s", ansi_supported=ansi_supported
-    )
-    file_formatter = StripAnsiFormatter("%(asctime)s - %(levelname)s - %(message)s")
-
-    # Обработчик для консоли
-    if ansi_supported:
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(console_formatter)
-    else:
-        # Альтернативный обработчик для старых Windows-консолей
-        console_handler = WindowsColorHandler()
-        console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-
-    # Уровень логирования для консоли
-    console_handler.setLevel(logging.DEBUG if debug_mode else logging.INFO)
-    logger.addHandler(console_handler)
-
-    # Обработчик для файла с ротацией
-    if log_to_file:
         log_file = os.path.join(log_dir, "debug.log")
         try:
             file_handler = SafeRotatingFileHandler(
@@ -243,20 +244,24 @@ def setup_logger(debug_mode=False, log_to_file=True, log_file_size=512 * 1024, b
             file_handler.setLevel(logging.DEBUG)
             logger.addHandler(file_handler)
         except PermissionError:
-            logger.warning("Failed to create log file due to permission issues.")
+            logger.warning(
+                "Failed to create log file due to permission issues.")
+        except Exception as e:
+            logger.error(f"Failed to set up log file handler: {e}")
 
-    # Регистрация безопасного завершения работы логгера при выходе
+    # Завершение работы логгера
     def shutdown_logging():
         logger.debug("Shutting down logging...")
+        for handler in logger.handlers[:]:
+            try:
+                handler.close()
+                logger.removeHandler(handler)
+            except Exception as e:
+                logger.warning(f"Error during shutdown: {e}")
         logging.shutdown()
 
-    # Проверяем stop_event перед завершением настройки
-    if stop_event.is_set():
-        logger.shutdown_logging("Stop event detected. Shutting down logging.")
-        shutdown_logging()
-        return logger
-
     atexit.register(shutdown_logging)
+
     return logger
 
 
@@ -459,12 +464,13 @@ def get_max_games(settings):
 
     return None  # Если max_games не задано или указано некорректно, возвращаем None
 
+
 def check_requirements(requirements_file="requirements.txt"):
     """
     Проверяет зависимости из файла requirements.txt.
     Если зависимости отсутствуют, выводит предупреждение и завершает выполнение.
     :param requirements_file: Путь к файлу requirements.txt
-    """    
+    """
 
     try:
         # Читаем зависимости из requirements.txt
@@ -500,6 +506,7 @@ def check_requirements(requirements_file="requirements.txt"):
     except Exception as e:
         logger.critical(f"Unknown error: {str(e)}")
         sys.exit(f"Unknown error: {str(e)}")
+
 
 class GlobalFlags:
     interrupted = False
