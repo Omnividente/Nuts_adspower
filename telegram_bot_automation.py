@@ -665,16 +665,24 @@ class TelegramBotAutomation:
 
     def clear_browser_cache_and_reload(self):
         """
-        Очищает кэш браузера и перезагружает текущую страницу.
+        Очищает кэш браузера, IndexedDB для https://web.telegram.org и перезагружает текущую страницу.
         """
         try:
             logger.debug(
-                f"#{self.serial_number}: Attempting to clear browser cache.")
+                f"#{self.serial_number}: Attempting to clear browser cache and IndexedDB for https://web.telegram.org.")
 
             # Очистка кэша через CDP команду
             self.driver.execute_cdp_cmd("Network.clearBrowserCache", {})
             logger.debug(
                 f"#{self.serial_number}: Browser cache successfully cleared.")
+
+            # Очистка IndexedDB для https://web.telegram.org
+            self.driver.execute_cdp_cmd("Storage.clearDataForOrigin", {
+                "origin": "https://web.telegram.org",
+                "storageTypes": "indexeddb"
+            })
+            logger.debug(
+                f"#{self.serial_number}: IndexedDB successfully cleared for https://web.telegram.org.")
 
             # Перезагрузка текущей страницы
             logger.debug(f"#{self.serial_number}: Refreshing the page.")
