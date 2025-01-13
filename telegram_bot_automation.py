@@ -701,12 +701,15 @@ class TelegramBotAutomation:
         Выполняет подготовительные действия для аккаунта с поддержкой остановки через stop_event.
         """
         actions = [
+            ("/html/body/div[2]/div[2]/div[2]/div[3]/div[4]/button[1]",
+             "Freeze button clicked"),
             ("/html/body/div[1]/div/button", "First start button claimed"),
             ("//button[contains(text(), 'Click now')]",
              "'Click now' button clicked"),
             ("/html/body/div[2]/div[2]/button",
              "Claimed welcome bonus: 1337 NUTS"),
             ("/html/body/div[2]/div[2]/div[2]/button", "Daily reward claimed")
+
         ]
 
         for xpath, success_msg in actions:
