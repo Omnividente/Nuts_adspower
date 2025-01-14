@@ -353,6 +353,8 @@ def navigate_and_perform_actions(bot, account):
         bot.run_courses_automation()
 
     bot.click_home_tab()
+    logger.debug("Starting farming again...")
+    bot.farming()
 
 # Парсинг баланса
 
