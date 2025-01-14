@@ -1188,9 +1188,9 @@ class TelegramBotAutomation:
         Выполняет действия 'Start farming' и 'Collect'
         """
         actions = [
-            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button | /html/body/div[1]/div/main/div[5]/button",
-             "'Start farming' button clicked"),
-            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button | /html/body/div[1]/div/main/div[5]/button",
+            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button | /html/body/div[1]/div/main/div[5]/button | //*[@id='root']/div/main/div[6]/button/div[1]",
+             "'Start farming' button clicked")
+            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button | /html/body/div[1]/div/main/div[5]/button | //*[@id='root']/div/main/div[6]/button/div[1]",
              "'Collect' button clicked")
         ]
         for xpath, success_msg in actions:
