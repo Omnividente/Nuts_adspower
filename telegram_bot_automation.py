@@ -795,7 +795,7 @@ class TelegramBotAutomation:
             try:
                 button = WebDriverWait(self.driver, 10).until(
                     EC.element_to_be_clickable(
-                        (By.CSS_SELECTOR, 'a[href="/home"]'))
+                        (By.CSS_SELECTOR, 'a[href="/"]'))
                 )
                 button.click()
                 logger.info(
@@ -822,6 +822,56 @@ class TelegramBotAutomation:
 
         logger.error(
             f"#{self.serial_number}: Exceeded maximum retries to click Home tab.")
+        return False
+
+    def click_earn_tab(self):
+        """
+        Функция для клика на вкладку "Home" с обработкой исключений и остановкой по событию.
+
+        :param driver: WebDriver Selenium.
+        :param stop_event: Событие threading.Event для остановки выполнения.
+        :param serial_number: Уникальный идентификатор для логирования.
+        :param max_retries: Максимальное количество попыток клика.
+        :return: None
+        """
+        retries = 0
+
+        while retries < self.MAX_RETRIES:
+            if stop_event.is_set():
+                logger.debug(
+                    f"#{self.serial_number}: Stop event detected. Exiting click_earn_tab.")
+                return False
+
+            try:
+                button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable(
+                        (By.CSS_SELECTOR, 'a[href="/earn"]'))
+                )
+                button.click()
+                logger.info(
+                    f"#{self.serial_number}: Successfully clicked on the earn tab.")
+                # Ждем полной загрузки страницы
+                self.wait_for_page_load()
+                return True  # Успешно выполнено, выходим из функции
+
+            except TimeoutException:
+                logger.debug(
+                    f"#{self.serial_number}: Earn tab not found within timeout.")
+                break
+
+            except WebDriverException as e:
+                logger.debug(
+                    f"#{self.serial_number}: Failed to click earn tab (attempt {retries + 1}): {str(e).splitlines()[0]}")
+                retries += 1
+                for _ in range(5):  # Проверяем stop_event во время паузы
+                    if stop_event.is_set():
+                        logger.info(
+                            f"#{self.serial_number}: Stop event detected during retry. Exiting click_earn_tab.")
+                        return False
+                    stop_event.wait(1)
+
+        logger.error(
+            f"#{self.serial_number}: Exceeded maximum retries to click earn tab.")
         return False
 
     def switch_to_iframe(self):
@@ -1138,12 +1188,11 @@ class TelegramBotAutomation:
         Выполняет действия 'Start farming' и 'Collect'
         """
         actions = [
-            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button",
+            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button | /html/body/div[1]/div/main/div[5]/button",
              "'Start farming' button clicked"),
-            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button",
+            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button | /html/body/div[1]/div/main/div[5]/button",
              "'Collect' button clicked")
         ]
-
         for xpath, success_msg in actions:
             retries = 0
             while retries < self.MAX_RETRIES:
@@ -1163,7 +1212,8 @@ class TelegramBotAutomation:
                         return
 
                     if button:
-                        button.click()
+                        self.safe_click(button)
+                        # button.click()
                         logger.info(f"#{self.serial_number}: {success_msg}")
 
                         sleep_time = random.randint(3, 4)
