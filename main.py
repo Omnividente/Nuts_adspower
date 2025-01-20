@@ -332,10 +332,6 @@ def navigate_and_perform_actions(bot, account):
         logger.debug("Stop event detected. Aborting before run courses.")
         return
 
-    if not bot.click_home_tab():
-        logger.error("Stop event detected. Aborting before run to Home tab.")
-        raise Exception("Failed to click home tab")
-
     if stop_event.is_set():
         logger.debug("Stop event detected. Aborting before farming.")
         return
