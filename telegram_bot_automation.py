@@ -697,6 +697,7 @@ class TelegramBotAutomation:
                 f"#{self.serial_number}: Unexpected error during cache clearing or page reload: {str(e)}")
 
     def preparing_account(self):
+        stop_event.wait(15)
         """
         Выполняет подготовительные действия для аккаунта с поддержкой остановки через stop_event.
         """
@@ -711,6 +712,7 @@ class TelegramBotAutomation:
             ("/html/body/div[2]/div[2]/button",
              "Claimed welcome bonus: 1337 NUTS"),
             ("/html/body/div[2]/div[2]/div[2]/button", "Daily reward claimed")
+
         ]
 
         for xpath, success_msg in actions:
@@ -725,12 +727,10 @@ class TelegramBotAutomation:
                     return
 
                 try:
-                    # Ожидание элемента
+                    # Поиск элемента по XPath
                     logger.debug(
-                        f"#{self.serial_number}: Waiting for element to appear: {xpath}")
-                    element = WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.XPATH, xpath))
-                    )
+                        f"#{self.serial_number}: Attempting to locate element for action: {success_msg}")
+                    element = self.driver.find_element(By.XPATH, xpath)
                     logger.debug(
                         f"#{self.serial_number}: Element located. Attempting to click.")
 
@@ -777,7 +777,7 @@ class TelegramBotAutomation:
             logger.debug(
                 f"#{self.serial_number}: Finished processing action: {success_msg}")
 
-        def click_home_tab(self):
+    def click_home_tab(self):
         """
         Функция для клика на вкладку "Home" с обработкой исключений и остановкой по событию.
 
