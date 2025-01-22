@@ -1390,7 +1390,7 @@ class TelegramBotAutomation:
 
         return False
 
-    def execute_course(self, question_answer_map, max_time_per_course=120):
+    def execute_course(self, question_answer_map, max_time_per_course=600):
         """
         Выполняет курс с ограничением времени.
         :param question_answer_map: Словарь с вопросами и ответами.
