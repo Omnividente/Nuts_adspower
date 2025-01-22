@@ -1390,7 +1390,7 @@ class TelegramBotAutomation:
 
         return False
 
-    def execute_course(self, question_answer_map, max_time_per_course=90):
+    def execute_course(self, question_answer_map, max_time_per_course=120):
         """
         Выполняет курс с ограничением времени.
         :param question_answer_map: Словарь с вопросами и ответами.
@@ -1410,7 +1410,7 @@ class TelegramBotAutomation:
                 stop_event.wait(1)
                 next_button = self.find_button_by_text("Далее", threshold=70) or \
                     self.find_button_by_text("Продолжить", threshold=70)
-
+                stop_event.wait(5)
                 if next_button and next_button.get_attribute("disabled"):
                     logger.debug(
                         f"#{self.serial_number}: The 'Next' or 'Continue' button is disabled. Handling the question..."
@@ -1574,6 +1574,14 @@ class TelegramBotAutomation:
             "Which portfolio is suitable for long-term investments (2+ years) with capital of $1,000?": "Safe portfolio (20% USDT, 50% BTC, 30% ETH).",
             "Какой портфель подходит для долгосрочных инвестиций (от двух лет) с капиталом от $1,000?": "Безопасный портфель (20% USDT, 50% BTC, 30% ETH).",
             "What percentage of the stablecoin market does USDT occupy?": "75%",
-            "Сколько процентов рынка стейблкоинов занимает USDT?": "75%"
+            "Сколько процентов рынка стейблкоинов занимает USDT?": "75%",
+            "Что Тим сделал не так?": "Купил BTC на все свои сбережения под влиянием новостей.",
+            "В чем преимущество стратегии Виктора?": "Виктор уменьшил риск и заработал, инвестируя постепенно.",
+            "Что такое DCA?": "Стратегия регулярных покупок актива на одинаковую сумму.",
+            "Почему стратегия DCA работает?": "Позволяет избежать импульсивных решений и приобретать активы по выгодным ценам.",
+            "Что такое стратегия «лесенка»?": "Продажа криптовалюты частями на разных уровнях цены.",
+            "Какую ошибку допустил Тим?": "Пытался угадать пик цены и в итоге упустил момент.",
+            "Выберите главный плюс стратегии «лесенка»": "Помогает зафиксировать прибыль даже при падении цены в будущем.",
+            "Что стоит сделать если цена актива выросла в 2 раза?": "Продать половину актива, чтобы забрать вложения."
         }
         self.click_start(question_answer_map)
