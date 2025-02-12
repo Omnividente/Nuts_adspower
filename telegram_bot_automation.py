@@ -385,7 +385,7 @@ class TelegramBotAutomation:
 
                 # Находим область ввода сообщения
                 chat_input_area = self.wait_for_element(
-                    By.XPATH, '/html/body/div[1]/div[1]/div[1]/div[1]/div[1]/div[1]/div[2]/input[1]'
+                    By.CSS_SELECTOR, '.input-search-input'
                 )
                 if chat_input_area:
                     logger.debug(
@@ -405,9 +405,8 @@ class TelegramBotAutomation:
                     continue
 
                 # Находим область поиска
-                search_area = self.wait_for_element(
-                    By.XPATH, '/html/body/div[1]/div[1]/div[1]/div[1]/div[1]/div[3]/div[2]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/ul[1]/a[1]/div[1]'
-                )
+                selector = "div.search-group.search-group-contacts.is-short div.c-ripple"
+                search_area = self.wait_for_element(By.CSS_SELECTOR, selector)
                 if search_area:
                     logger.debug(f"#{self.serial_number}: Search area found.")
                     search_area.click()
@@ -702,6 +701,8 @@ class TelegramBotAutomation:
         Выполняет подготовительные действия для аккаунта с поддержкой остановки через stop_event.
         """
         actions = [
+            ("//button[@class='group relative flex h-14 w-full items-start outline-none']//div[contains(text(), 'Заморозить')]",
+             "Заморозить button clicked"),
             ("(//button[contains(@class, 'group relative flex h-14 w-full items-start outline-none')])[1]",
              "Freeze button clicked"),
             ("/html/body/div[2]/div[2]/div[2]/div[3]/div[4]/button[1]",
@@ -1464,7 +1465,6 @@ class TelegramBotAutomation:
                 ))
             )
 
-
             # Получаем родительский элемент <button> для клика
             parent_button = claim_button.find_element(
                 By.XPATH, "./ancestor::button")
@@ -1588,6 +1588,6 @@ class TelegramBotAutomation:
             "Откуда берется прибыль за стейкинг?": "За поддержку сети, кредитование или промо программы биржи.",
             "Как связана поддержка блокчейна и награды за стейкинг?": "Замораживая монеты, вы помогаете сети обрабатывать транзакции и обеспечивать безопасность, за что получаете награды.",
             "Как работают промо-программы с запуском новых проектов?": "Биржа начисляет токены нового проекта за стейкинг вашей криптовалюты."
-            
+
         }
         self.click_start(question_answer_map)
