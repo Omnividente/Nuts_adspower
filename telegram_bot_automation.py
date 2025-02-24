@@ -697,6 +697,7 @@ class TelegramBotAutomation:
 
     def preparing_account(self):
         stop_event.wait(15)
+        self.interact_with_onboarding_window()
         """
         Выполняет подготовительные действия для аккаунта с поддержкой остановки через stop_event.
         """
@@ -777,6 +778,7 @@ class TelegramBotAutomation:
                     break
             logger.debug(
                 f"#{self.serial_number}: Finished processing action: {success_msg}")
+        self.click_home_tab()
 
     def click_home_tab(self):
         """
@@ -827,6 +829,93 @@ class TelegramBotAutomation:
         logger.error(
             f"#{self.serial_number}: Exceeded maximum retries to click Home tab.")
         return False
+
+    def interact_with_onboarding_window(self):
+        """
+        Взаимодействует с онбординг-окном, кликая на кнопку 'Next onboarding slide'.
+        На последнем слайде кликает 'Complete onboarding'. 
+        Затем ждёт 10 секунд и переходит на вкладку Home.
+        """
+        try:
+            # Ждём появления кнопки с 'Next onboarding slide' или 'Complete onboarding'
+            # (вдруг откроется сразу финальный слайд).
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((
+                    By.XPATH,
+                    '//button[@aria-label="Next onboarding slide" or @aria-label="Complete onboarding"]'
+                ))
+            )
+            logger.info(
+                f"#{self.serial_number}: Onboarding window detected. Starting interaction.")
+
+            retries = 0
+            while retries < 10:
+                if stop_event.is_set():
+                    logger.debug(
+                        f"#{self.serial_number}: Stop event detected. Exiting interact_with_onboarding_window.")
+                    return False
+
+                # Ищем кнопки "Next onboarding slide" и "Complete onboarding"
+                next_buttons = self.driver.find_elements(
+                    By.XPATH, '//button[@aria-label="Next onboarding slide"]')
+                complete_buttons = self.driver.find_elements(
+                    By.XPATH, '//button[@aria-label="Complete onboarding"]')
+
+                # Если нет ни одной кнопки, значит окно пропало или DOM поменялся
+                if not next_buttons and not complete_buttons:
+                    logger.info(
+                        f"#{self.serial_number}: Onboarding window closed or buttons not found.")
+                    stop_event.wait(10)  # ждём 10 секунд
+                    return True
+
+                if complete_buttons:
+                    # Если появляется кнопка "Complete onboarding", кликаем по ней
+                    self.safe_click(complete_buttons[0])
+                    stop_event.wait(1)  # даём время обновиться DOM
+
+                    # После клика проверяем, не пропало ли окно
+                    next_buttons = self.driver.find_elements(
+                        By.XPATH, '//button[@aria-label="Next onboarding slide"]')
+                    complete_buttons = self.driver.find_elements(
+                        By.XPATH, '//button[@aria-label="Complete onboarding"]')
+                    if not next_buttons and not complete_buttons:
+                        logger.info(
+                            f"#{self.serial_number}: Onboarding complete. Window closed.")
+                        stop_event.wait(10)
+                        return True
+
+                elif next_buttons:
+                    # Иначе, если всё ещё есть кнопка "Next onboarding slide", кликаем
+                    self.safe_click(next_buttons[0])
+                    stop_event.wait(1)
+
+                retries += 1
+
+            # Если после 10 итераций окно не закрылось, пробуем кликнуть "Complete onboarding" (если есть)
+            complete_buttons = self.driver.find_elements(
+                By.XPATH, '//button[@aria-label="Complete onboarding"]')
+            if complete_buttons:
+                self.safe_click(complete_buttons[0])
+                stop_event.wait(1)
+
+            # Финальный чек: если всё ещё не закрылось, просто переходим на Home
+            logger.warning(
+                f"#{self.serial_number}: Onboarding window did not close after maximum retries.")
+            stop_event.wait(10)
+            return False
+
+        except TimeoutException:
+            logger.debug(
+                f"#{self.serial_number}: Onboarding window/button not found in time. Skipping interaction.")
+            # Если не появилось окно — просто переходим на вкладку Home с 10-сек паузой
+            stop_event.wait(10)
+            return False
+
+        except Exception as e:
+            logger.error(
+                f"#{self.serial_number}: Error interacting with onboarding window: {str(e)}")
+            stop_event.wait(10)
+            return False
 
     def click_earn_tab(self):
         """
@@ -963,6 +1052,7 @@ class TelegramBotAutomation:
         """
         Извлекает текущий баланс пользователя с поддержкой остановки через stop_event.
         """
+        self.switch_to_iframe()
         retries = 0
         while retries < self.MAX_RETRIES:
             if stop_event.is_set():  # Проверка на остановку перед началом цикла
@@ -975,9 +1065,14 @@ class TelegramBotAutomation:
                     f"#{self.serial_number}: Attempting to retrieve balance (attempt {retries + 1}).")
 
                 # Ожидание контейнера с балансом
+                # parent_block = WebDriverWait(self.driver, 30).until(
+                #     EC.presence_of_element_located(
+                #         (By.XPATH, "font-tt-hoves-expanded"))
+                # )
                 parent_block = WebDriverWait(self.driver, 30).until(
                     EC.presence_of_element_located(
-                        (By.XPATH, "//div[contains(@class, 'flex items-center font-tt-hoves')]"))
+                        (By.CLASS_NAME, "font-tt-hoves-expanded")
+                    )
                 )
                 logger.debug(
                     f"#{self.serial_number}: Parent block for balance found.")
