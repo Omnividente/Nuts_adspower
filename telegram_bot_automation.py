@@ -701,84 +701,94 @@ class TelegramBotAutomation:
         """
         Выполняет подготовительные действия для аккаунта с поддержкой остановки через stop_event.
         """
-        actions = [
+
+        initial_actions = [
             ("//button[@class='group relative flex h-14 w-full items-start outline-none']//div[contains(text(), 'Заморозить')]",
              "Заморозить button clicked"),
             ("(//button[contains(@class, 'group relative flex h-14 w-full items-start outline-none')])[1]",
              "Freeze button clicked"),
             ("/html/body/div[2]/div[2]/div[2]/div[3]/div[4]/button[1]",
              "Freeze button clicked"),
+            ("/html/body/div[2]/div[2]/div[2]/button", "Daily reward claimed")
+        ]
+
+        remaining_actions = [
             ("/html/body/div[1]/div/button", "First start button claimed"),
             ("//button[contains(text(), 'Click now')]",
              "'Click now' button clicked"),
             ("/html/body/div[2]/div[2]/button",
-             "Claimed welcome bonus: 1337 NUTS"),
-            ("/html/body/div[2]/div[2]/div[2]/button", "Daily reward claimed")
-
+             "Claimed welcome bonus: 1337 NUTS")
         ]
 
-        for xpath, success_msg in actions:
-            retries = 0
-            logger.debug(
-                f"#{self.serial_number}: Starting action for XPath: {xpath}")
+        def process_actions(actions):
+            for xpath, success_msg in actions:
+                retries = 0
+                logger.debug(
+                    f"#{self.serial_number}: Starting action for XPath: {xpath}")
 
-            while retries < self.MAX_RETRIES:
-                if stop_event.is_set():  # Проверка на остановку перед выполнением действия
-                    logger.info(
-                        f"#{self.serial_number}: Stop event detected. Exiting preparing_account.")
-                    return
+                while retries < self.MAX_RETRIES:
+                    if stop_event.is_set():  # Проверка на остановку перед выполнением действия
+                        logger.info(
+                            f"#{self.serial_number}: Stop event detected. Exiting preparing_account.")
+                        return
 
-                try:
-                    # Поиск элемента по XPath
-                    logger.debug(
-                        f"#{self.serial_number}: Attempting to locate element for action: {success_msg}")
-                    element = self.driver.find_element(By.XPATH, xpath)
-                    logger.debug(
-                        f"#{self.serial_number}: Element located. Attempting to click.")
-
-                    # Клик по элементу
-                    element.click()
-                    logger.info(f"#{self.serial_number}: {success_msg}")
-
-                    # Сон перед следующим действием с проверкой stop_event
-                    sleep_time = random.randint(5, 7)
-                    logger.debug(
-                        f"#{self.serial_number}: Sleeping for {sleep_time} seconds after action.")
-                    for _ in range(sleep_time):
-                        if stop_event.is_set():
-                            logger.info(
-                                f"#{self.serial_number}: Stop event detected during sleep. Exiting preparing_account.")
-                            return
-                        stop_event.wait(1)
-
-                    break  # Успешное завершение действия
-
-                except NoSuchElementException:
-                    logger.debug(
-                        f"#{self.serial_number}: Element not found for action: {success_msg}. Skipping.")
-                    break  # Пропускаем текущую кнопку
-                except WebDriverException as e:
-                    retries += 1
-                    logger.debug(
-                        f"#{self.serial_number}: Failed action (attempt {retries}): {str(e).splitlines()[0]}")
-                    for _ in range(5):  # Пауза с проверкой stop_event
-                        if stop_event.is_set():
-                            logger.info(
-                                f"#{self.serial_number}: Stop event detected during retry wait. Exiting preparing_account.")
-                            return
-                        stop_event.wait(1)
-
-                    if retries >= self.MAX_RETRIES:
+                    try:
                         logger.debug(
-                            f"#{self.serial_number}: Exceeded maximum retries for action: {success_msg}")
+                            f"#{self.serial_number}: Attempting to locate element for action: {success_msg}")
+                        element = self.driver.find_element(By.XPATH, xpath)
+                        logger.debug(
+                            f"#{self.serial_number}: Element located. Attempting to click.")
+                        element.click()
+                        logger.info(f"#{self.serial_number}: {success_msg}")
+
+                        sleep_time = random.randint(5, 7)
+                        logger.debug(
+                            f"#{self.serial_number}: Sleeping for {sleep_time} seconds after action.")
+                        for _ in range(sleep_time):
+                            if stop_event.is_set():
+                                logger.info(
+                                    f"#{self.serial_number}: Stop event detected during sleep. Exiting preparing_account.")
+                                return
+                            stop_event.wait(1)
+
+                        break  # Успешное завершение действия
+
+                    except NoSuchElementException:
+                        logger.debug(
+                            f"#{self.serial_number}: Element not found for action: {success_msg}. Skipping.")
+                        break  # Пропускаем текущую кнопку
+                    except WebDriverException as e:
+                        retries += 1
+                        logger.debug(
+                            f"#{self.serial_number}: Failed action (attempt {retries}): {str(e).splitlines()[0]}")
+                        for _ in range(5):  # Пауза с проверкой stop_event
+                            if stop_event.is_set():
+                                logger.info(
+                                    f"#{self.serial_number}: Stop event detected during retry wait. Exiting preparing_account.")
+                                return
+                            stop_event.wait(1)
+
+                        if retries >= self.MAX_RETRIES:
+                            logger.debug(
+                                f"#{self.serial_number}: Exceeded maximum retries for action: {success_msg}")
+                            break
+                    except Exception as e:
+                        logger.debug(
+                            f"#{self.serial_number}: Unexpected error during action '{success_msg}': {str(e)}")
                         break
-                except Exception as e:
-                    logger.debug(
-                        f"#{self.serial_number}: Unexpected error during action '{success_msg}': {str(e)}")
-                    break
-            logger.debug(
-                f"#{self.serial_number}: Finished processing action: {success_msg}")
+                logger.debug(
+                    f"#{self.serial_number}: Finished processing action: {success_msg}")
+
+        # Выполнение начальных действий
+        process_actions(initial_actions)
+
+        # Попытка нажать Home Tab
+        logger.debug(f"#{self.serial_number}: Attempting to click Home Tab")
         self.click_home_tab()
+        logger.debug(f"#{self.serial_number}: Finished clicking Home Tab")
+
+        # Выполнение оставшихся действий
+        process_actions(remaining_actions)
 
     def click_home_tab(self):
         """
