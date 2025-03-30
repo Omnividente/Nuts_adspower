@@ -1356,37 +1356,75 @@ class TelegramBotAutomation:
                             f"#{self.serial_number}: No <button> elements found at all.")
                         break
 
-                    found_button = False
+                    found_button = None
 
                     for button in all_buttons:
-                        # Достаём HTML (или innerText — если уверены, что там есть текст)
                         button_html = self.driver.execute_script(
                             "return arguments[0].outerHTML;", button).lower()
 
-                        # Если любой из ключевых слов есть в HTML, значит это нужная кнопка
                         if any(kw in button_html for kw in keywords):
-                            self.safe_click(button)
-                            logger.info(
-                                f"#{self.serial_number}: {success_msg}")
-
-                            sleep_time = random.randint(3, 5)
-                            logger.debug(
-                                f"#{self.serial_number}: Sleeping for {sleep_time} seconds.")
-                            for _ in range(sleep_time):
-                                if stop_event.is_set():
-                                    logger.info(
-                                        f"#{self.serial_number}: Stop event detected during sleep. Exiting.")
-                                    return
-                                stop_event.wait(1)
-
-                            found_button = True
-                            break  # Вышли из цикла обхода кнопок
+                            found_button = button
+                            break
 
                     if found_button:
-                        # Кнопку нашли и нажали — переходим к следующему действию (Start farming -> Collect)
+                        # Кликаем по найденной кнопке
+                        self.safe_click(found_button)
+                        logger.info(f"#{self.serial_number}: {success_msg}")
+
+                        # Стандартная небольшая пауза 3-5 секунд
+                        sleep_time = random.randint(3, 5)
+                        logger.debug(
+                            f"#{self.serial_number}: Sleeping for {sleep_time} seconds.")
+                        for _ in range(sleep_time):
+                            if stop_event.is_set():
+                                logger.info(
+                                    f"#{self.serial_number}: Stop event detected during sleep. Exiting.")
+                                return
+                            stop_event.wait(1)
+
+                        # Если это кнопка "собрать"/"collect", то ждём до 15 сек и ищем "начать фармить"/"start farming"
+                        if any(kw in keywords for kw in ["собрать", "collect"]):
+                            logger.debug(
+                                f"#{self.serial_number}: Collect button was clicked. Will wait up to 15s and check for 'start farming' button...")
+
+                            # Попробуем найти "start farming" в течение 15 секунд
+                            wait_start_time = time.time()
+                            farming_keywords = [
+                                "начать фармить", "start farming"]
+                            farming_found = False
+
+                            while time.time() - wait_start_time < 15:
+                                # Проверим, не остановились ли
+                                if stop_event.is_set():
+                                    logger.info(
+                                        f"#{self.serial_number}: Stop event detected during 15s wait. Exiting.")
+                                    return
+
+                                # Поищем кнопку "начать фармить"/"start farming"
+                                farm_buttons = self.driver.find_elements(
+                                    By.TAG_NAME, "button")
+                                for fb in farm_buttons:
+                                    fb_html = self.driver.execute_script(
+                                        "return arguments[0].outerHTML;", fb).lower()
+                                    if any(fkw in fb_html for fkw in farming_keywords):
+                                        # Если нашли – кликаем и выходим
+                                        self.safe_click(fb)
+                                        logger.info(
+                                            f"#{self.serial_number}: 'Start farming' button clicked (after collecting).")
+                                        farming_found = True
+                                        break
+
+                                if farming_found:
+                                    break
+
+                                # Подождём 1 сек, после чего проверим снова
+                                stop_event.wait(1)
+
+                        # Кнопку нашли и нажали, выходим из цикла обхода кнопок
                         break
+
                     else:
-                        # Кнопку с таким текстом не нашли, завершаем это действие
+                        # Не нашли кнопку с такими словами
                         logger.debug(
                             f"#{self.serial_number}: No button matching {keywords} found. Skipping.")
                         break
@@ -1398,7 +1436,7 @@ class TelegramBotAutomation:
                     )
                     logger.debug(traceback.format_exc())
 
-                    # Небольшая пауза между попытками
+                    # Небольшая пауза между повторными попытками
                     for _ in range(5):
                         if stop_event.is_set():
                             logger.info(
