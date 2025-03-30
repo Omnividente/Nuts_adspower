@@ -699,72 +699,103 @@ class TelegramBotAutomation:
         stop_event.wait(15)
         self.interact_with_onboarding_window()
         """
-        Выполняет подготовительные действия для аккаунта с поддержкой остановки через stop_event.
+        Выполняет подготовительные действия для аккаунта, перебирая все кнопки
+        и проверяя нужные ключевые слова (например, «Заморозить», «Freeze», «Daily reward» и т.д.).
         """
 
+        # Вместо XPath в парах храним ключевые слова, которые надо найти в кнопке
+        # + успех-сообщение для логгера
         initial_actions = [
-            ("//button[@class='group relative flex h-14 w-full items-start outline-none']//div[contains(text(), 'Заморозить')]",
-             "Заморозить button clicked"),
-            ("(//button[contains(@class, 'group relative flex h-14 w-full items-start outline-none')])[1]",
-             "Freeze button clicked"),
-            ("/html/body/div[2]/div[2]/div[2]/div[3]/div[4]/button[1]",
-             "Freeze button clicked"),
-            ("/html/body/div[2]/div[2]/div[2]/button", "Daily reward claimed")
+            (["заморозить"], "Заморозить button clicked"),
+            (["заморозить"], "Freeze button clicked"),
+            (["reward", "daily reward"], "Daily reward claimed"),
         ]
 
         remaining_actions = [
-            ("/html/body/div[1]/div/button", "First start button claimed"),
-            ("//button[contains(text(), 'Click now')]",
-             "'Click now' button clicked"),
-            ("/html/body/div[2]/div[2]/button",
-             "Claimed welcome bonus: 1337 NUTS")
+            (["first start"], "First start button claimed"),
+            (["click now"], "'Click now' button clicked"),
+            (["1337 nuts", "welcome bonus"], "Claimed welcome bonus: 1337 NUTS"),
         ]
 
         def process_actions(actions):
-            for xpath, success_msg in actions:
+            """
+            Перебирает каждое действие (ключевые слова, success_msg),
+            ищет на странице все <button>, проверяет, есть ли ключевые слова в HTML
+            и при нахождении — нажимает и делает паузу.
+            """
+            for keywords, success_msg in actions:
                 retries = 0
                 logger.debug(
-                    f"#{self.serial_number}: Starting action for XPath: {xpath}")
+                    f"#{self.serial_number}: Starting action: {success_msg}")
 
                 while retries < self.MAX_RETRIES:
-                    if stop_event.is_set():  # Проверка на остановку перед выполнением действия
+                    if stop_event.is_set():
                         logger.info(
                             f"#{self.serial_number}: Stop event detected. Exiting preparing_account.")
                         return
 
                     try:
-                        logger.debug(
-                            f"#{self.serial_number}: Attempting to locate element for action: {success_msg}")
-                        element = self.driver.find_element(By.XPATH, xpath)
-                        logger.debug(
-                            f"#{self.serial_number}: Element located. Attempting to click.")
-                        element.click()
-                        logger.info(f"#{self.serial_number}: {success_msg}")
+                        # Находим все кнопки на странице
+                        buttons = self.driver.find_elements(
+                            By.TAG_NAME, "button")
+                        if not buttons:
+                            logger.debug(
+                                f"#{self.serial_number}: No <button> elements found at all. Skipping.")
+                            break
 
-                        sleep_time = random.randint(5, 7)
-                        logger.debug(
-                            f"#{self.serial_number}: Sleeping for {sleep_time} seconds after action.")
-                        for _ in range(sleep_time):
-                            if stop_event.is_set():
+                        found_and_clicked = False
+
+                        for btn in buttons:
+                            # Получим outerHTML, чтобы точно увидеть и вложенные элементы, и текст
+                            btn_html = self.driver.execute_script(
+                                "return arguments[0].outerHTML;", btn).lower().strip()
+
+                            # Проверяем, есть ли хотя бы одно ключевое слово в HTML кнопки
+                            if any(kw in btn_html for kw in keywords):
+                                # Дополнительная логика, если хотим уточнить насчёт «заморозить»
+                                # (и в success_msg есть слово Freeze)
+                                if "freeze" in success_msg.lower():
+                                    # Если строго хотим убедиться, что именно слово «заморозить» есть
+                                    # (а не просто 'замор') то уже учли в `keywords`
+                                    pass
+
+                                logger.debug(
+                                    f"#{self.serial_number}: Found match for '{success_msg}' in button: {btn_html}")
+                                btn.click()
                                 logger.info(
-                                    f"#{self.serial_number}: Stop event detected during sleep. Exiting preparing_account.")
-                                return
-                            stop_event.wait(1)
+                                    f"#{self.serial_number}: {success_msg}")
 
-                        break  # Успешное завершение действия
+                                sleep_time = random.randint(5, 7)
+                                logger.debug(
+                                    f"#{self.serial_number}: Sleeping for {sleep_time} seconds after action.")
+                                for _ in range(sleep_time):
+                                    if stop_event.is_set():
+                                        logger.info(
+                                            f"#{self.serial_number}: Stop event detected during sleep. Exiting.")
+                                        return
+                                    stop_event.wait(1)
 
-                    except NoSuchElementException:
-                        logger.debug(
-                            f"#{self.serial_number}: Element not found for action: {success_msg}. Skipping.")
-                        break  # Пропускаем текущую кнопку
+                                found_and_clicked = True
+                                break  # Выходим из цикла перебора кнопок
+
+                        if found_and_clicked:
+                            # Успешно кликнули — переходим к следующему действию
+                            break
+                        else:
+                            logger.debug(
+                                f"#{self.serial_number}: Didn't find matching button for '{success_msg}'. Skipping.")
+                            break
+
                     except WebDriverException as e:
                         retries += 1
                         logger.debug(
-                            f"#{self.serial_number}: Failed action (attempt {retries}): {str(e).splitlines()[0]}")
-                        for _ in range(5):  # Пауза с проверкой stop_event
+                            f"#{self.serial_number}: Failed action '{success_msg}' (attempt {retries}): {str(e).splitlines()[0]}"
+                        )
+                        for _ in range(5):
                             if stop_event.is_set():
                                 logger.info(
-                                    f"#{self.serial_number}: Stop event detected during retry wait. Exiting preparing_account.")
+                                    f"#{self.serial_number}: Stop event detected during retry wait. Exiting preparing_account."
+                                )
                                 return
                             stop_event.wait(1)
 
@@ -779,15 +810,15 @@ class TelegramBotAutomation:
                 logger.debug(
                     f"#{self.serial_number}: Finished processing action: {success_msg}")
 
-        # Выполнение начальных действий
+        # 1) Выполняем «начальные» действия
         process_actions(initial_actions)
 
-        # Попытка нажать Home Tab
+        # 2) Пробуем кликнуть Home Tab (ваш код)
         logger.debug(f"#{self.serial_number}: Attempting to click Home Tab")
         self.click_home_tab()
         logger.debug(f"#{self.serial_number}: Finished clicking Home Tab")
 
-        # Выполнение оставшихся действий
+        # 3) Выполняем «оставшиеся» действия
         process_actions(remaining_actions)
 
     def click_home_tab(self):
@@ -1291,68 +1322,92 @@ class TelegramBotAutomation:
         return "N/A"
 
     def farming(self):
-        # Ждем полной загрузки страницы
         self.wait_for_page_load()
         """
-        Выполняет действия 'Start farming' и 'Collect'
+        1) Находит все <button> на странице;
+        2) Проверяет, есть ли в их HTML ключевые слова ('начать фармить', 'собрать', и т. п.);
+        3) При совпадении кликает.
         """
+
+        # Пары (список ключевых слов, сообщение логгера):
         actions = [
-            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button | /html/body/div[1]/div/main/div[5]/button | //*[@id='root']/div/main/div[6]/button/div[1]",
+            (["начать фармить", "start farming"],
              "'Start farming' button clicked"),
-            ("/html[1]/body[1]/div[1]/div[1]/main[1]/div[5]/button[1] | /html[1]/body[1]/div[1]/div[1]/main[1]/div[4]/button[1]/div[1] | /html/body/div[1]/div[1]/main/div[4]/button | /html/body/div[1]/div/main/div[5]/button | //*[@id='root']/div/main/div[6]/button/div[1]",
-             "'Collect' button clicked")
+            (["собрать", "collect"], "'Collect' button clicked")
         ]
-        for xpath, success_msg in actions:
+
+        for keywords, success_msg in actions:
             retries = 0
             while retries < self.MAX_RETRIES:
-                if stop_event.is_set():  # Проверка на прерывание перед выполнением действий
+                if stop_event.is_set():
                     logger.info(
-                        f"#{self.serial_number}: Stopping farming due to stop event.")
+                        f"#{self.serial_number}: Stop event detected in farming. Exiting...")
                     return
 
                 try:
                     logger.debug(
-                        f"#{self.serial_number}: Attempting action: {success_msg}")
+                        f"#{self.serial_number}: Searching for a button with keywords: {keywords}")
 
-                    button = self.wait_for_element(By.XPATH, xpath, timeout=10)
-                    if stop_event.is_set():  # Повторная проверка после потенциально долгого ожидания
-                        logger.info(
-                            f"#{self.serial_number}: Stop event detected after wait. Exiting...")
-                        return
-
-                    if button:
-                        self.safe_click(button)
-                        # button.click()
-                        logger.info(f"#{self.serial_number}: {success_msg}")
-
-                        sleep_time = random.randint(3, 4)
+                    # Находим все кнопки на странице
+                    all_buttons = self.driver.find_elements(
+                        By.TAG_NAME, "button")
+                    if not all_buttons:
                         logger.debug(
-                            f"#{self.serial_number}: Sleeping for {sleep_time} seconds before next action.")
-                        # Разбиваем sleep на интервалы для проверки stop_event
-                        for _ in range(sleep_time):
-                            if stop_event.is_set():
-                                logger.info(
-                                    f"#{self.serial_number}: Stop event detected during sleep. Exiting...")
-                                return
-                            stop_event.wait(1)
+                            f"#{self.serial_number}: No <button> elements found at all.")
+                        break
 
+                    found_button = False
+
+                    for button in all_buttons:
+                        # Достаём HTML (или innerText — если уверены, что там есть текст)
+                        button_html = self.driver.execute_script(
+                            "return arguments[0].outerHTML;", button).lower()
+
+                        # Если любой из ключевых слов есть в HTML, значит это нужная кнопка
+                        if any(kw in button_html for kw in keywords):
+                            self.safe_click(button)
+                            logger.info(
+                                f"#{self.serial_number}: {success_msg}")
+
+                            sleep_time = random.randint(3, 5)
+                            logger.debug(
+                                f"#{self.serial_number}: Sleeping for {sleep_time} seconds.")
+                            for _ in range(sleep_time):
+                                if stop_event.is_set():
+                                    logger.info(
+                                        f"#{self.serial_number}: Stop event detected during sleep. Exiting.")
+                                    return
+                                stop_event.wait(1)
+
+                            found_button = True
+                            break  # Вышли из цикла обхода кнопок
+
+                    if found_button:
+                        # Кнопку нашли и нажали — переходим к следующему действию (Start farming -> Collect)
                         break
                     else:
+                        # Кнопку с таким текстом не нашли, завершаем это действие
                         logger.debug(
-                            f"#{self.serial_number}: Element not found for action: {success_msg}. Skipping...")
+                            f"#{self.serial_number}: No button matching {keywords} found. Skipping.")
                         break
+
                 except WebDriverException as e:
                     retries += 1
                     logger.warning(
-                        f"#{self.serial_number}: Failed action (attempt {retries}): {str(e).splitlines()[0]}")
+                        f"#{self.serial_number}: Failed to find/click button (attempt {retries}): {str(e).splitlines()[0]}"
+                    )
                     logger.debug(traceback.format_exc())
 
-                    for _ in range(5):  # Проверка во время ожидания перед следующей попыткой
+                    # Небольшая пауза между попытками
+                    for _ in range(5):
                         if stop_event.is_set():
                             logger.info(
-                                f"#{self.serial_number}: Stop event detected during retry sleep. Exiting...")
+                                f"#{self.serial_number}: Stop event detected during retry wait. Exiting.")
                             return
                         stop_event.wait(1)
+
+            logger.debug(
+                f"#{self.serial_number}: Finished action with keywords: {keywords}")
 
     def find_button_by_text(self, text, threshold=70):
         """
@@ -1496,7 +1551,7 @@ class TelegramBotAutomation:
 
         return False
 
-    def execute_course(self, question_answer_map, max_time_per_course=600):
+    def execute_course2(self, question_answer_map, max_time_per_course=600):
         """
         Выполняет курс с ограничением времени.
         :param question_answer_map: Словарь с вопросами и ответами.
@@ -1553,6 +1608,94 @@ class TelegramBotAutomation:
         except Exception as e:
             logger.error(
                 f"#{self.serial_number}: Error during quiz execution: {e}")
+
+    def execute_course(self, question_answer_map, max_time_per_course=600):
+        """
+        Выполняет курс с ограничением времени.
+        :param question_answer_map: Словарь с вопросами и ответами.
+        :param max_time_per_course: Максимальное время выполнения курса (в секундах).
+        """
+        start_time = time.time()  # Время начала курса
+
+        try:
+            while True:
+                # Проверяем, не истекло ли время
+                elapsed_time = time.time() - start_time
+                if elapsed_time > max_time_per_course:
+                    logger.warning(
+                        f"#{self.serial_number}: Time limit of {max_time_per_course} seconds exceeded. Exiting course execution."
+                    )
+                    return  # Прекращаем выполнение курса
+
+                # Даём потоку "поспать" немного, чтобы не зациклиться слишком быстро
+                stop_event.wait(1)
+
+                # Ищем кнопки "Далее"/"Продолжить" и новую кнопку "Ответить"
+                next_button = (self.find_button_by_text("Далее", threshold=70)
+                               or self.find_button_by_text("Продолжить", threshold=70))
+                answer_button = self.find_button_by_text(
+                    "Ответить", threshold=70)
+
+                # Если нашли кнопку "Далее"/"Продолжить"
+                if next_button:
+                    # Даём ещё небольшую паузу
+                    stop_event.wait(5)
+
+                    # Проверяем, не отключена ли кнопка
+                    if next_button.get_attribute("disabled"):
+                        logger.debug(
+                            f"#{self.serial_number}: The 'Next'/'Continue' button is disabled. Handling the question..."
+                        )
+
+                        # Пытаемся найти вопрос и ответ
+                        if self.find_question_and_answer(question_answer_map):
+                            stop_event.wait(2)
+                            self.safe_click(next_button)
+                        else:
+                            logger.debug(
+                                f"#{self.serial_number}: Answer not found. Refreshing the current page..."
+                            )
+                            script = """
+                                window.location.assign(window.location.origin + window.location.pathname);
+                            """
+                            self.driver.execute_script(script)
+                            stop_event.wait(5)
+                            self.switch_to_iframe()
+                            return
+                    else:
+                        # Если кнопка "Далее"/"Продолжить" активна — жмём и идём дальше
+                        logger.debug(
+                            f"#{self.serial_number}: The 'Next'/'Continue' button is active. Clicking..."
+                        )
+                        self.safe_click(next_button)
+                        continue  # Переходим к следующему шагу
+
+                # Если же кнопки "Далее"/"Продолжить" нет, но есть "Ответить" (квиз)
+                elif answer_button:
+                    logger.debug(
+                        f"#{self.serial_number}: 'Answer (Ответить)' button detected. Attempting to answer quiz..."
+                    )
+                    # Тут может быть логика аналогичная find_question_and_answer, если нужно
+                    # либо просто клик, если система сама далее подставляет ответы
+                    self.safe_click(answer_button)
+                    stop_event.wait(2)
+
+                    # После нажатия "Ответить" обычно либо появится след. кнопка «Далее»/«Продолжить»,
+                    # либо можно сразу повторить цикл, чтобы обработать дальнейшие действия
+                    continue
+
+                else:
+                    # Если ни одной из кнопок нет — пробуем "Claim" (или завершаем процесс)
+                    logger.debug(
+                        f"#{self.serial_number}: No 'Next'/'Continue'/'Answer' button found. Searching for the 'Claim' button..."
+                    )
+                    self.click_claim_button(question_answer_map)
+                    break  # Выходим из цикла
+
+        except Exception as e:
+            logger.error(
+                f"#{self.serial_number}: Error during quiz execution: {e}"
+            )
 
     def click_claim_button(self, question_answer_map):
         """
@@ -1692,7 +1835,14 @@ class TelegramBotAutomation:
             "Что такое стейкинг?": "Процесс, при котором вы «замораживаете» свою криптовалюту, чтобы получать проценты.",
             "Откуда берется прибыль за стейкинг?": "За поддержку сети, кредитование или промо программы биржи.",
             "Как связана поддержка блокчейна и награды за стейкинг?": "Замораживая монеты, вы помогаете сети обрабатывать транзакции и обеспечивать безопасность, за что получаете награды.",
-            "Как работают промо-программы с запуском новых проектов?": "Биржа начисляет токены нового проекта за стейкинг вашей криптовалюты."
+            "Как работают промо-программы с запуском новых проектов?": "Биржа начисляет токены нового проекта за стейкинг вашей криптовалюты.",
+            "Ты хочешь продать USDT через P2P. Что нужно проверить перед сделкой?": "Репутацию и отзывы покупателя",
+            "Тебе пишет «представитель биржи» и просит подтвердить данные, иначе аккаунт заблокируют. Что делать?": "Проигнорировать и обратиться в поддержку биржи",
+            "Какой признак указывает на мошеннический сайт биржи?": "Адрес сайта отличается на одну букву от оригинала",
+            "Что изучает фундаментальный анализ (ФА)?": "Технологию проекта, команду, конкурентов и ключевые метрики.",
+            "Чем фундаментальный анализ (ФА) отличается от технического анализа (ТА)?": "ФА помогает выбрать активы на долгий срок, а ТА используется для краткосрочных сделок.",
+            "Что делать, если блогер рассказывает про «перспективную» монету?": "Провести ФА: проверить команду, токены, партнеров и активность."
+
 
         }
         self.click_start(question_answer_map)
