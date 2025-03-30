@@ -700,21 +700,24 @@ class TelegramBotAutomation:
         self.interact_with_onboarding_window()
         """
         Выполняет подготовительные действия для аккаунта, перебирая все кнопки
-        и проверяя нужные ключевые слова (например, «Заморозить», «Freeze», «Daily reward» и т.д.).
+        и проверяя нужные ключевые слова (например, «Заморозить», «Freeze», «Daily reward», «забрать» и т.д.).
         """
 
-        # Вместо XPath в парах храним ключевые слова, которые надо найти в кнопке
-        # + успех-сообщение для логгера
+        # "Начальные" действия
         initial_actions = [
             (["заморозить"], "Заморозить button clicked"),
             (["заморозить"], "Freeze button clicked"),
-            (["reward", "daily reward"], "Daily reward claimed"),
+            # Расширяем поисковые слова для daily rewards, включая "забрать"
+            (["reward", "daily reward", "забрать"], "Daily reward claimed"),
         ]
 
+        # "Оставшиеся" действия
         remaining_actions = [
             (["first start"], "First start button claimed"),
             (["click now"], "'Click now' button clicked"),
             (["1337 nuts", "welcome bonus"], "Claimed welcome bonus: 1337 NUTS"),
+            # Строку (["забрать"], "'Забрать' button clicked") убрали,
+            # т.к. теперь она в initial_actions (как часть Daily reward).
         ]
 
         def process_actions(actions):
@@ -746,28 +749,24 @@ class TelegramBotAutomation:
                         found_and_clicked = False
 
                         for btn in buttons:
-                            # Получим outerHTML, чтобы точно увидеть и вложенные элементы, и текст
+                            # Получим outerHTML, чтобы увидеть и вложенные элементы, и текст
                             btn_html = self.driver.execute_script(
-                                "return arguments[0].outerHTML;", btn).lower().strip()
+                                "return arguments[0].outerHTML;", btn
+                            ).lower().strip()
 
                             # Проверяем, есть ли хотя бы одно ключевое слово в HTML кнопки
                             if any(kw in btn_html for kw in keywords):
-                                # Дополнительная логика, если хотим уточнить насчёт «заморозить»
-                                # (и в success_msg есть слово Freeze)
-                                if "freeze" in success_msg.lower():
-                                    # Если строго хотим убедиться, что именно слово «заморозить» есть
-                                    # (а не просто 'замор') то уже учли в `keywords`
-                                    pass
-
                                 logger.debug(
-                                    f"#{self.serial_number}: Found match for '{success_msg}' in button: {btn_html}")
+                                    f"#{self.serial_number}: Found match for '{success_msg}' in button: {btn_html}"
+                                )
                                 btn.click()
                                 logger.info(
                                     f"#{self.serial_number}: {success_msg}")
 
                                 sleep_time = random.randint(5, 7)
                                 logger.debug(
-                                    f"#{self.serial_number}: Sleeping for {sleep_time} seconds after action.")
+                                    f"#{self.serial_number}: Sleeping for {sleep_time} seconds after action."
+                                )
                                 for _ in range(sleep_time):
                                     if stop_event.is_set():
                                         logger.info(
@@ -791,6 +790,7 @@ class TelegramBotAutomation:
                         logger.debug(
                             f"#{self.serial_number}: Failed action '{success_msg}' (attempt {retries}): {str(e).splitlines()[0]}"
                         )
+                        # Небольшая пауза между попытками
                         for _ in range(5):
                             if stop_event.is_set():
                                 logger.info(
@@ -805,15 +805,17 @@ class TelegramBotAutomation:
                             break
                     except Exception as e:
                         logger.debug(
-                            f"#{self.serial_number}: Unexpected error during action '{success_msg}': {str(e)}")
+                            f"#{self.serial_number}: Unexpected error during action '{success_msg}': {str(e)}"
+                        )
                         break
+
                 logger.debug(
                     f"#{self.serial_number}: Finished processing action: {success_msg}")
 
         # 1) Выполняем «начальные» действия
         process_actions(initial_actions)
 
-        # 2) Пробуем кликнуть Home Tab (ваш код)
+        # 2) Переходим на вкладку Home
         logger.debug(f"#{self.serial_number}: Attempting to click Home Tab")
         self.click_home_tab()
         logger.debug(f"#{self.serial_number}: Finished clicking Home Tab")
