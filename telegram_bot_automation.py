@@ -1614,7 +1614,9 @@ class TelegramBotAutomation:
 
                 # Ищем кнопки "Далее"/"Продолжить" и новую кнопку "Ответить"
                 next_button = (self.find_button_by_text("Далее", threshold=70)
-                               or self.find_button_by_text("Продолжить", threshold=70) or self.find_button_by_text("Поехали", threshold=70))
+                               or self.find_button_by_text("Продолжить", threshold=70) or self.find_button_by_text("Поехали", threshold=70)
+                               or self.find_button_by_text("Где искать эту информацию", threshold=70)
+                               or self.find_button_by_text("Отлично", threshold=70))
                 answer_button = self.find_button_by_text(
                     "Ответить", threshold=70)
 
