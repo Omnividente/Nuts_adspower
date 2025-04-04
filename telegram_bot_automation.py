@@ -1591,64 +1591,6 @@ class TelegramBotAutomation:
 
         return False
 
-    def execute_course2(self, question_answer_map, max_time_per_course=600):
-        """
-        Выполняет курс с ограничением времени.
-        :param question_answer_map: Словарь с вопросами и ответами.
-        :param max_time_per_course: Максимальное время выполнения курса (в секундах).
-        """
-        start_time = time.time()  # Время начала курса
-
-        try:
-            while True:
-                # Проверяем, не истекло ли время
-                elapsed_time = time.time() - start_time
-                if elapsed_time > max_time_per_course:
-                    logger.warning(
-                        f"#{self.serial_number}: Time limit of {max_time_per_course} seconds exceeded. Exiting course execution."
-                    )
-                    return  # Прекращаем выполнение курса
-                stop_event.wait(1)
-                next_button = self.find_button_by_text("Далее", threshold=70) or \
-                    self.find_button_by_text("Продолжить", threshold=70)
-                stop_event.wait(5)
-                if next_button and next_button.get_attribute("disabled"):
-                    logger.debug(
-                        f"#{self.serial_number}: The 'Next' or 'Continue' button is disabled. Handling the question..."
-                    )
-                    if self.find_question_and_answer(question_answer_map):
-                        stop_event.wait(2)
-                        self.safe_click(next_button)
-                    else:
-                        logger.debug(
-                            f"#{self.serial_number}: Answer not found. Refreshing the current page..."
-                        )
-                        script = """
-                            window.location.assign(window.location.origin + window.location.pathname);
-                        """
-                        self.driver.execute_script(script)
-                        stop_event.wait(5)
-                        self.switch_to_iframe()
-                        return
-
-                if next_button:
-                    logger.debug(
-                        f"#{self.serial_number}: The 'Next' or 'Continue' button is active. Clicking..."
-                    )
-                    self.safe_click(next_button)
-                    continue  # Продолжаем цикл для следующего шага курса
-
-                else:
-                    logger.debug(
-                        f"#{self.serial_number}: The 'Next' or 'Continue' button is not found. Searching for the 'Claim' button..."
-                    )
-                    self.click_claim_button(question_answer_map)
-                    break  # Завершаем выполнение, если кнопка не найдена
-
-        except Exception as e:
-            logger.error(
-                f"#{self.serial_number}: Error during quiz execution: {e}")
-
     def execute_course(self, question_answer_map, max_time_per_course=600):
         """
         Выполняет курс с ограничением времени.
@@ -1672,7 +1614,7 @@ class TelegramBotAutomation:
 
                 # Ищем кнопки "Далее"/"Продолжить" и новую кнопку "Ответить"
                 next_button = (self.find_button_by_text("Далее", threshold=70)
-                               or self.find_button_by_text("Продолжить", threshold=70))
+                               or self.find_button_by_text("Продолжить", threshold=70) or self.find_button_by_text("Поехали", threshold=70))
                 answer_button = self.find_button_by_text(
                     "Ответить", threshold=70)
 
